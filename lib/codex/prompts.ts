@@ -21,6 +21,9 @@ const QUESTION_SHAPE = `{
   "difficulty": "easy" | "medium" | "hard"
 }`;
 
+// Owner requirement: all content stays traceable to, and inside, the official AAMC MCAT content specifications.
+const ALIGNMENT = `AAMC alignment (mandatory): everything you write must stay inside the scope and depth of the official AAMC MCAT content specifications for this subject. Do not introduce material outside that scope or unsupported claims. Do not duplicate or misclassify content that belongs to another major section, and never alter the approved Sub-Codex structure. If you are unsure whether something is in scope, leave it out and say so (declaredGaps when planning, sourceBasis when writing questions).`;
+
 const JSON_ONLY = `Reply with ONE JSON object and nothing else: no prose before or after, no markdown fences, double-quoted keys, no trailing commas.`;
 
 // ── Stage 1: topic planning ─────────────────────────────────────────────────
@@ -39,6 +42,8 @@ How to plan
 7. Be honest about known gaps in declaredGaps.
 8. Do not output IDs for subsections or topics; they are assigned afterwards by software. Never rename the major section.
 9. Report counts exactly: reportedCounts.subsections has one entry per subsection (matching its title) with the number of topics you listed under it, and majorSectionTotal is the total number of topics you listed. These are checked mechanically.
+
+${ALIGNMENT}
 
 ${JSON_ONLY}
 Shape:
@@ -97,6 +102,8 @@ Requirements
 11. cognitiveSkill is the AAMC skill mainly tested. difficulty is easy, medium or hard relative to a typical MCAT test taker.
 12. If <correction_instructions> is present, your earlier question was found to have problems by independent verification. Write a NEW question that fixes every listed problem; do not argue with the findings and do not reuse text that was found incorrect.
 
+${ALIGNMENT}
+
 ${JSON_ONLY}
 Shape:
 ${QUESTION_SHAPE}`;
@@ -145,6 +152,8 @@ Rules
 10. Use only well-established, textbook-level science. Do not invent facts, constants, names or studies. references: cite only sources you are confident exist; never fabricate authors, titles, years or DOIs; leave references empty if none applies.
 11. If <correction_instructions> is present, independent verification found problems with the earlier result. Write corrected questions that fix every listed problem; do not argue with the findings and do not reuse text that was found incorrect.
 12. Output ONLY the questions. No concept list, outline, syllabus or notes.
+
+${ALIGNMENT}
 
 ${JSON_ONLY}
 Shape: {"questions": [ <question>, ... ]} where each <question> is
@@ -222,6 +231,7 @@ For each question check, using only well-established textbook-level science:
 4. That the stem is unambiguous and self-contained.
 5. Distractor quality: plausible, not trivially wrong, not giving the answer away.
 6. Unsupported assertions: claims, numbers or names stated without a basis. Do not accept an invented citation.
+7. Scope: content outside the official AAMC MCAT content specifications for the subject, or tested at a depth the exam does not require. Report it as a warning.
 
 Report problems as issues. severity "error" means the question must not be used until fixed (wrong key, factual error, ambiguity that changes the answer, a materially wrong explanation); "warning" means worth improving but usable. For each issue say who is responsible: "this_question", "parent_question" (this atomic question is fine but its parent question is wrong), or "topic_specification" (the topic itself is ill-defined). Give a concrete suggestedFix. verdict: "pass" (no error issues), "fail" (at least one error issue) or "uncertain". You are an automated reviewer: you do not approve questions, you only report.
 
