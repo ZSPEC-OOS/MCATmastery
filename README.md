@@ -60,3 +60,29 @@ MCAT Mastery lets students practice MCAT-style questions, track their progress o
 ---
 
 © 2026 MCAT Mastery. All rights reserved.
+
+---
+
+## MCAT Codex (second app)
+
+After the PIN login, `/` shows two tiles: **MCAT Mastery** (everything above, now under `/mastery`) and **MCAT Codex**.
+
+Codex is a separate, structured question generator. You give it a **Sub-Codex** (paste or `.txt`):
+
+```
+Subject: Biology
+MS-1: Molecular Biology and Genetics
+MS-2: Cell Structure and Function
+```
+
+and it runs: topic plan per major section → one **parent** MCQ per topic → the minimum set of **atomic** MCQs each parent needs →
+AI verification (blind solve + scientific review, with bounded automatic correction) → **your approval**. IDs are assigned by code
+(`MS-1-SS-2-15`, atoms `MS-1-SS-2-15-A3`). Only questions you approve are exported as "approved".
+
+- **Isolated from Mastery:** Codex reads and writes only its own Firestore collections (`codex_runs`, `codex_tasks`, `codex_topics`,
+  `codex_questions`) and Firebase Storage under `codex/`. It never touches the Mastery question bank.
+- **Shared with Mastery:** the PIN login, the Firebase project, and the AI models configured in Admin → Settings
+  (the *generation* role writes; the *audit* role solves blind and reviews).
+- **No background worker:** the run page drives the pipeline one task at a time and saves after every step, so you can pause or
+  close the page and resume later. Keep the page open while a run is going.
+- Code: `lib/codex/` (engine, prompts, checks, store), `app/api/codex/`, `app/codex/`.

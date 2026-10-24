@@ -7,10 +7,11 @@ import { clearCurrentUser } from "./PinAuth";
 import ThemeToggle from "./ThemeToggle";
 
 const navLinks = [
-  { label: "Dashboard",  href: "/" },
+  { label: "Dashboard",  href: "/mastery" },
   { label: "Practice",   href: "/practice" },
   { label: "Review",     href: "/review" },
   { label: "Analytics",  href: "/analytics" },
+  { label: "All apps",   href: "/" },
 ];
 
 export default function Navbar() {
@@ -18,7 +19,7 @@ export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const isActive = (href: string) =>
-    href === "/" ? pathname === "/" : pathname.startsWith(href);
+    href === "/" || href === "/mastery" ? pathname === href : pathname.startsWith(href);
 
   return (
     <>
