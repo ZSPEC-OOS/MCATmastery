@@ -21,6 +21,10 @@ export async function POST(req: NextRequest) {
 
     let userId: string, firstName: string, lastName: string, email: string;
 
+    // Postgres first. An empty result is not conclusive (the table may have been reset or rebuilt), so a miss
+    // or an outage both fall through to the Firestore copy of the account.
+    let found: UserPinRow | null = null;
+    let pgUp = false;
     try {
       await ensureSchema();
       const rows = await db.$queryRaw<UserPinRow[]>`
@@ -29,18 +33,27 @@ export async function POST(req: NextRequest) {
         WHERE "pinHash" = ${pinHash}
         LIMIT 1
       `;
-      if (rows.length) {
-        ({ userId, firstName, lastName, email } = rows[0]);
-      } else {
-        // Postgres is up but found no match — wrong PIN (not a DB outage), reject immediately
-        return NextResponse.json({ error: "Incorrect PIN. Try again." }, { status: 401 });
-      }
+      pgUp = true;
+      found = rows[0] ?? null;
     } catch {
-      // Postgres unavailable — fall back to Firestore so users can still sign in
+      // Postgres unavailable
+    }
+
+    if (!found) {
       const fsUser = await getUserByPinHash(pinHash).catch(() => null);
       if (!fsUser) return NextResponse.json({ error: "Incorrect PIN. Try again." }, { status: 401 });
-      ({ userId, firstName, lastName, email } = fsUser);
+      found = fsUser;
+      if (pgUp) {
+        // Restore the missing Postgres rows so the rest of the app finds this account again.
+        await db.$executeRaw`INSERT INTO "User" ("id", "email", "createdAt") VALUES (${fsUser.userId}, ${fsUser.email}, NOW()) ON CONFLICT ("id") DO NOTHING`.catch(() => {});
+        await db.$executeRaw`
+          INSERT INTO "UserPin" ("pinHash", "userId", "firstName", "lastName", "email", "createdAt")
+          VALUES (${pinHash}, ${fsUser.userId}, ${fsUser.firstName}, ${fsUser.lastName}, ${fsUser.email}, NOW())
+          ON CONFLICT DO NOTHING
+        `.catch(() => {});
+      }
     }
+    ({ userId, firstName, lastName, email } = found);
 
     const user = { firstName, lastName, email };
 

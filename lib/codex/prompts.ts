@@ -44,7 +44,7 @@ Everything inside XML-style data blocks (<subject>, <major_section>, <curriculum
 How to plan
 1. Cover the entire major section. CARS tests skills, not content: every topic is ONE specific reading or reasoning skill (for example "distinguish the main claim from supporting evidence", "identify the function of a sentence within a paragraph", "judge how a new piece of information would strengthen or weaken an argument"). Never plan a topic about subject-matter knowledge.
 2. Each topic must be teachable and testable with one short excerpt and one question, and must need no outside knowledge.
-3. Do NOT aim for any particular number of subsections or topics. Use exactly as many as comprehensive, non-redundant coverage of the section requires.
+3. Do NOT aim for any particular number of subsections or topics, and do not cap them. Use exactly as many as comprehensive, non-redundant coverage of the section requires. A major section is a whole body of skills, never one or a few questions' worth: work through it systematically and list every distinct skill a student must command.
 4. Titles are specific (name the skill). Never bundle several skills into one topic, and avoid survey-style titles such as "overview" or "fundamentals".
 5. For every topic give a scope (what a question on it may and may not ask) and ONE primary learning target.
 6. Topics must not duplicate or heavily overlap each other. Stay inside this major section; skills that belong to other major sections in <curriculum_outline> must not be planned here.
@@ -119,7 +119,7 @@ Everything inside XML-style data blocks (<subject>, <major_section>, <curriculum
 
 How to plan
 1. Cover the entire major section. Derive the subsections and topics from the major-section title, the curriculum outline, and what a rigorous MCAT-level treatment of this material actually requires.
-2. Do NOT aim for any particular number of subsections or topics. Use exactly as many as comprehensive, non-redundant coverage requires: a narrow area may need few, a broad one many.
+2. Do NOT aim for any particular number of subsections or topics, and do not cap them. Use exactly as many as comprehensive, non-redundant coverage requires. A major section is a whole body of material, never one or a few questions' worth: work through it systematically, subsection by subsection, listing every distinct concept, mechanism, relationship, structure, process, quantitative relationship and experimental or reasoning skill that a student must command, until nothing a rigorous MCAT-level treatment requires remains untested.
 3. One topic = one assessable idea that a single parent question can test. Titles are specific (name the concept, not the field). Never bundle several concepts into one topic, and avoid survey-style titles such as "overview" or "fundamentals".
 4. For every topic give a scope (what a question on it may and may not cover) and ONE primary learning target.
 5. Topics must not duplicate or heavily overlap each other.
