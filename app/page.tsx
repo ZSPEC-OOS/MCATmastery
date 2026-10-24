@@ -1,13 +1,6 @@
-import Navbar from "./components/Navbar";
-import Footer from "./components/Footer";
-import HomeDashboard from "./components/HomeDashboard";
+import AppLauncher from "./components/AppLauncher";
 
+// After the PIN login (PinGate in the root layout) the user lands here and picks an app.
 export default function Page() {
-  return (
-    <div className="flex flex-col min-h-screen">
-      <Navbar />
-      <HomeDashboard />
-      <Footer />
-    </div>
-  );
+  return <AppLauncher />;
 }
