@@ -47,8 +47,9 @@ function applyAnswerTo(prev: CodexProgress | undefined, a: { userId: string; run
   };
 }
 
-// Later stages first, so work finishes end-to-end instead of piling up half-built.
-const STAGE_RANK: Record<CodexStage, number> = { verify: 0, atomic: 1, parent: 2, plan: 3 };
+// Earlier stages first: every plan, then every parent question, then every atomic set, then verification.
+// Corrections queued by verification re-enter at their own stage and are worked through in the same order.
+const STAGE_RANK: Record<CodexStage, number> = { plan: 0, parent: 1, atomic: 2, verify: 3 };
 
 export function pickClaimable(tasks: CodexTask[], now: Date): CodexTask[] {
   const t = now.getTime();
