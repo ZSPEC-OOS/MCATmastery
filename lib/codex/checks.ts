@@ -3,7 +3,7 @@
 
 import { z } from "zod";
 import type { Finding, QuestionContent } from "./types";
-import { ATOMIC_MAX_PER_PARENT } from "./types";
+import { ATOMIC_MAX_PER_PARENT, EXPAND_MAX_TARGETS } from "./types";
 
 const words = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
@@ -195,6 +195,38 @@ export const PlanSchema = z.object({
   }).optional(),
 });
 export type Plan = z.infer<typeof PlanSchema>;
+
+// ── Topic expansion ─────────────────────────────────────────────────────────
+
+export const ExpandSchema = z.object({
+  reasoning: z.string().default(""),
+  targets: z.array(z.object({
+    title: text(300),
+    scope: text(1500),
+    primaryLearningTarget: text(800),
+  })).min(1).max(EXPAND_MAX_TARGETS),
+});
+export type Expansion = z.infer<typeof ExpandSchema>;
+
+export function checkExpansion(raw: unknown, siblingTitles: string[]): Parsed<Expansion> {
+  const parsed = ExpandSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, findings: parsed.error.issues.slice(0, 12).map((i) => err("SCHEMA", `${i.path.join(".") || "expansion"}: ${i.message}`)) };
+  }
+  const findings: Finding[] = [];
+  const t = parsed.data.targets;
+  for (let i = 0; i < t.length; i++) {
+    if (words(t[i].title) > 24) findings.push(err("TOPIC_TOO_LONG", `Target "${t[i].title.slice(0, 60)}…" is too long to be a single idea.`));
+    for (let j = i + 1; j < t.length; j++) {
+      if (similarity(t[i].title, t[j].title) >= 0.8) findings.push(err("DUPLICATE_TOPIC", `Targets "${t[i].title}" and "${t[j].title}" duplicate each other.`));
+    }
+    for (const s of siblingTitles) {
+      if (norm(s) === norm(t[i].title)) findings.push(err("DUPLICATE_TOPIC", `Target "${t[i].title}" duplicates another topic in this subsection.`));
+    }
+  }
+  const blocking = findings.some((f) => f.severity === "error");
+  return { ok: !blocking, value: blocking ? undefined : parsed.data, findings };
+}
 
 const SURVEY = /\b(overview|fundamentals|introduction to|basics of|general principles)\b/i;
 

@@ -1,6 +1,7 @@
 // MCAT Codex pipeline engine.
 //
-//   Sub-Codex → topic plan (per major section) → one parent MCQ per topic → atomic MCQs derived from each
+//   Sub-Codex → topic plan (per major section) → topic expansion (as many parent topics as the topic needs)
+//   → one parent MCQ per topic → atomic MCQs derived from each
 //   parent → AI verification (blind solve + scientific review) → bounded correction → human approval.
 //
 // There is no background worker: every unit of work is a persisted task, and `advance()` runs exactly one
@@ -10,14 +11,14 @@
 import type { CodexStore } from "./store";
 import { parseSubCodex } from "./subcodex";
 import {
-  ATOMIC_MAX_PER_PARENT, MAX_CORRECTION_ATTEMPTS, MAX_REPAIR_ROUNDS, MAX_TASK_ATTEMPTS, atomicId, depthAtLeast, isCarsSubject, subsectionId, topicId,
+  ATOMIC_MAX_PER_PARENT, MAX_CORRECTION_ATTEMPTS, MAX_REPAIR_ROUNDS, MAX_TASK_ATTEMPTS, atomicId, depthAtLeast, isCarsSubject, splitTopicId, subsectionId, topicId,
 } from "./types";
 import type {
   CodexDepth, CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, Finding, QuestionContent, QuestionStatus, VerificationRecord,
 } from "./types";
-import { checkAtomicSet, checkParent, checkPlan } from "./checks";
+import { checkAtomicSet, checkExpansion, checkParent, checkPlan } from "./checks";
 import {
-  renderAtomicPrompt, renderBlindPrompt, renderCoveragePrompt, renderParentPrompt, renderPlanningPrompt, renderReviewPrompt,
+  renderAtomicPrompt, renderBlindPrompt, renderCoveragePrompt, renderExpandPrompt, renderParentPrompt, renderPlanningPrompt, renderReviewPrompt,
 } from "./prompts";
 
 // ── Dependencies ────────────────────────────────────────────────────────────
@@ -101,7 +102,7 @@ export interface Progress {
 export async function getProgress(store: CodexStore, runId: string): Promise<Progress> {
   const [tasks, topics, questions] = await Promise.all([store.listTasks(runId), store.listTopics(runId), store.listQuestions(runId)]);
   const empty = () => ({ queued: 0, running: 0, done: 0, failed: 0 });
-  const byStage: Progress["tasks"] = { plan: empty(), parent: empty(), atomic: empty(), verify: empty() };
+  const byStage: Progress["tasks"] = { plan: empty(), expand: empty(), parent: empty(), atomic: empty(), verify: empty() };
   for (const t of tasks) byStage[t.stage][t.status]++;
   const qs: Progress["questions"] = { draft: 0, auto_passed: 0, flagged: 0, approved: 0, rejected: 0, superseded: 0 };
   for (const q of questions) qs[q.status]++;
@@ -140,6 +141,7 @@ export async function advance(deps: Deps, runId: string): Promise<AdvanceResult>
   try {
     switch (task.stage) {
       case "plan":   await runPlan(deps, run, task); break;
+      case "expand": await runExpand(deps, run, task); break;
       case "parent": await runParent(deps, run, task); break;
       case "atomic": await runAtomic(deps, run, task); break;
       case "verify": await runVerify(deps, run, task); break;
@@ -238,9 +240,48 @@ async function runPlan(deps: Deps, run: CodexRun, task: CodexTask) {
 
   await deps.store.putTopics(topics);
   await deps.store.updateSection(run.id, section.number, { planned: true, coverageSummary: plan.coverageSummary, declaredGaps: plan.declaredGaps, subsections });
+  // Each planned topic is then expanded into as many parent-question topics as it needs (possibly just itself).
+  const now = iso(nowOf(deps));
+  await deps.store.putTasks(topics.map((t) => newTask(run.id, "expand", t.id, now)));
+}
+
+// ── Stage 1b: topic expansion ───────────────────────────────────────────────
+
+async function runExpand(deps: Deps, run: CodexRun, task: CodexTask) {
+  const topic = await deps.store.getTopic(run.id, task.targetId);
+  if (!topic) throw new ContentFailure(`Unknown topic ${task.targetId}`, []);
+  const section = run.sections.find((s) => s.id === topic.sectionId)!;
+  const siblingTitles = (await deps.store.listTopics(run.id)).filter((t) => t.subsectionId === topic.subsectionId && t.id !== topic.id).map((t) => t.title);
+
+  const { value } = await generateValidated(deps, {
+    role: "generation",
+    maxTokens: 6000,
+    render: (repair) =>
+      renderExpandPrompt({
+        cars: isCarsSubject(run.subject),
+        subject: run.subject,
+        topic: { id: topic.id, title: topic.title, majorSection: section.title, subsection: topic.subsectionTitle, scope: topic.scope, primaryLearningTarget: topic.primaryLearningTarget },
+        siblingTitles,
+        ...(repair ? { repair } : {}),
+      }),
+    validate: (json) => checkExpansion(json, siblingTitles),
+  });
+
+  const now = iso(nowOf(deps));
+  let parentTopics: string[] = [topic.id];
+  if (value.targets.length > 1) {
+    // The broad topic is replaced by finer ones, each with exactly one parent question. Numbers sort them in place.
+    const children: CodexTopic[] = value.targets.map((t, i) => ({
+      id: splitTopicId(topic.id, i + 1), runId: run.id, sectionId: topic.sectionId,
+      subsectionId: topic.subsectionId, subsectionTitle: topic.subsectionTitle, number: topic.number + (i + 1) / 1000,
+      title: t.title, scope: t.scope, primaryLearningTarget: t.primaryLearningTarget, correctionAttempts: 0, groupTitle: topic.title,
+    }));
+    await deps.store.putTopics(children);
+    await deps.store.updateTopic(run.id, topic.id, { expanded: true });
+    parentTopics = children.map((c) => c.id);
+  }
   if (depthAtLeast(run.depth, "parents")) {
-    const now = iso(nowOf(deps));
-    await deps.store.putTasks(topics.map((t) => newTask(run.id, "parent", t.id, now, "__r1")));
+    await deps.store.putTasks(parentTopics.map((id) => newTask(run.id, "parent", id, now, "__r1")));
   }
 }
 

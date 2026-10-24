@@ -22,6 +22,7 @@ export interface CodexStore {
   claimNextTask(runId: string, now: Date, leaseMs: number): Promise<CodexTask | null>;
 
   putTopics(topics: CodexTopic[]): Promise<void>;
+  /** Working topics only: a topic that was split into finer ones is not listed (getTopic still returns it). */
   listTopics(runId: string): Promise<CodexTopic[]>;
   getTopic(runId: string, id: string): Promise<CodexTopic | null>;
   updateTopic(runId: string, id: string, patch: Partial<CodexTopic>): Promise<void>;
@@ -49,7 +50,7 @@ function applyAnswerTo(prev: CodexProgress | undefined, a: { userId: string; run
 
 // Earlier stages first: every plan, then every parent question, then every atomic set, then verification.
 // Corrections queued by verification re-enter at their own stage and are worked through in the same order.
-const STAGE_RANK: Record<CodexStage, number> = { plan: 0, parent: 1, atomic: 2, verify: 3 };
+const STAGE_RANK: Record<CodexStage, number> = { plan: 0, expand: 1, parent: 2, atomic: 3, verify: 4 };
 
 export function pickClaimable(tasks: CodexTask[], now: Date): CodexTask[] {
   const t = now.getTime();
@@ -59,7 +60,7 @@ export function pickClaimable(tasks: CodexTask[], now: Date): CodexTask[] {
       if (x.status === "running") return !!x.leaseUntil && new Date(x.leaseUntil).getTime() < t;
       return false;
     })
-    .sort((a, b) => STAGE_RANK[a.stage] - STAGE_RANK[b.stage] || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    .sort((a, b) => STAGE_RANK[a.stage] - STAGE_RANK[b.stage] || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id, undefined, { numeric: true }));
 }
 
 // ── Memory ──────────────────────────────────────────────────────────────────
@@ -96,7 +97,7 @@ export function createMemoryStore(): CodexStore {
       return clone(claimed);
     },
     async putTopics(list) { for (const t of list) topics.set(docId(t.runId, t.id), clone(t)); },
-    async listTopics(runId) { return [...topics.values()].filter((t) => t.runId === runId).map(clone); },
+    async listTopics(runId) { return [...topics.values()].filter((t) => t.runId === runId && !t.expanded).map(clone); },
     async getTopic(runId, id) { const t = topics.get(docId(runId, id)); return t ? clone(t) : null; },
     async updateTopic(runId, id, patch) { const k = docId(runId, id); const t = topics.get(k); if (t) topics.set(k, { ...t, ...clone(patch) }); },
     async putQuestion(q) { questions.set(docId(q.runId, q.id), clone(q)); },
@@ -208,7 +209,7 @@ export function createFirestoreStore(): CodexStore {
         await batch.commit();
       }
     },
-    async listTopics(runId) { return byRun<CodexTopic>(C.topics, runId); },
+    async listTopics(runId) { return (await byRun<CodexTopic>(C.topics, runId)).filter((t) => !t.expanded); },
     async getTopic(runId, id) { const d = await col(C.topics).doc(docId(runId, id)).get(); return d.exists ? (d.data() as CodexTopic) : null; },
     async updateTopic(runId, id, patch) { await col(C.topics).doc(docId(runId, id)).update(clean(patch)); },
 
