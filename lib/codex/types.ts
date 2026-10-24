@@ -96,7 +96,11 @@ export interface Option {
   rationale?: string;       // required on the three distractors
 }
 
+/** CARS tests reading and reasoning skills, not content, so its questions carry a short excerpt to read. */
+export const isCarsSubject = (subject: string) => /\bCARS\b/.test(subject) || /critical analysis and reasoning/i.test(subject);
+
 export interface QuestionContent {
+  passage?: string;         // CARS only: short original excerpt the question is answered from
   stem: string;
   options: Option[];
   correctKey: "A" | "B" | "C" | "D";
@@ -146,3 +150,21 @@ export interface CodexQuestion {
 }
 
 export const docId = (runId: string, ...parts: (string | number)[]) => [runId, ...parts].join("__");
+
+// ── Study progress (per learner, per question) ──────────────────────────────
+
+export interface CodexProgress {
+  id: string;               // `${userId}__${runId}__${qid}` (document id)
+  userId: string;
+  runId: string;
+  qid: string;
+  attempts: number;
+  correctCount: number;
+  streak: number;           // consecutive correct answers; mastered at MASTERY_STREAK
+  lastCorrect: boolean;
+  lastAnswer: string;
+  lastAt: string;
+}
+
+export const MASTERY_STREAK = 2;
+export const progressId = (userId: string, runId: string, qid: string) => `${userId}__${runId}__${qid}`;

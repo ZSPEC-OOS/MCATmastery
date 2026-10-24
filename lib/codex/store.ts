@@ -2,8 +2,8 @@
 // touch the Mastery question bank. Firebase is initialised by Mastery's own FIREBASE_SERVICE_ACCOUNT variable.
 // A memory implementation backs the offline self-test.
 
-import type { CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, RunSection } from "./types";
-import { docId } from "./types";
+import type { CodexProgress, CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, RunSection } from "./types";
+import { docId, progressId } from "./types";
 
 export interface CodexStore {
   createRun(run: CodexRun): Promise<void>;
@@ -29,6 +29,22 @@ export interface CodexStore {
   putQuestion(q: CodexQuestion): Promise<void>;
   listQuestions(runId: string): Promise<CodexQuestion[]>;
   updateQuestion(runId: string, id: string, patch: Partial<CodexQuestion>): Promise<void>;
+  getQuestion(runId: string, id: string): Promise<CodexQuestion | null>;
+
+  /** Study progress for one learner in one run. */
+  listProgress(userId: string, runId: string): Promise<CodexProgress[]>;
+  /** Atomically records one answer and returns the updated progress. */
+  recordAnswer(a: { userId: string; runId: string; qid: string; correct: boolean; answer: string; now: Date }): Promise<CodexProgress>;
+}
+
+function applyAnswerTo(prev: CodexProgress | undefined, a: { userId: string; runId: string; qid: string; correct: boolean; answer: string; now: Date }): CodexProgress {
+  return {
+    id: progressId(a.userId, a.runId, a.qid), userId: a.userId, runId: a.runId, qid: a.qid,
+    attempts: (prev?.attempts ?? 0) + 1,
+    correctCount: (prev?.correctCount ?? 0) + (a.correct ? 1 : 0),
+    streak: a.correct ? (prev?.streak ?? 0) + 1 : 0,
+    lastCorrect: a.correct, lastAnswer: a.answer, lastAt: a.now.toISOString(),
+  };
 }
 
 // Later stages first, so work finishes end-to-end instead of piling up half-built.
@@ -52,6 +68,7 @@ export function createMemoryStore(): CodexStore {
   const tasks = new Map<string, CodexTask>();
   const topics = new Map<string, CodexTopic>();
   const questions = new Map<string, CodexQuestion>();
+  const progress = new Map<string, CodexProgress>();
   const clone = <T>(v: T): T => structuredClone(v);
   return {
     async createRun(run) { runs.set(run.id, clone(run)); },
@@ -64,7 +81,7 @@ export function createMemoryStore(): CodexStore {
     },
     async deleteRun(id) {
       runs.delete(id);
-      for (const m of [tasks, topics, questions]) for (const [k, v] of m) if ((v as { runId: string }).runId === id) m.delete(k);
+      for (const m of [tasks, topics, questions, progress]) for (const [k, v] of m) if ((v as { runId: string }).runId === id) m.delete(k);
     },
     async putTasks(list) { for (const t of list) tasks.set(docId(t.runId, t.id), clone(t)); },
     async listTasks(runId) { return [...tasks.values()].filter((t) => t.runId === runId).map(clone); },
@@ -84,12 +101,19 @@ export function createMemoryStore(): CodexStore {
     async putQuestion(q) { questions.set(docId(q.runId, q.id), clone(q)); },
     async listQuestions(runId) { return [...questions.values()].filter((q) => q.runId === runId).map(clone); },
     async updateQuestion(runId, id, patch) { const k = docId(runId, id); const q = questions.get(k); if (q) questions.set(k, { ...q, ...clone(patch) }); },
+    async getQuestion(runId, id) { const q = questions.get(docId(runId, id)); return q ? clone(q) : null; },
+    async listProgress(userId, runId) { return [...progress.values()].filter((p) => p.userId === userId && p.runId === runId).map(clone); },
+    async recordAnswer(a) {
+      const next = applyAnswerTo(progress.get(progressId(a.userId, a.runId, a.qid)), a);
+      progress.set(next.id, next);
+      return clone(next);
+    },
   };
 }
 
 // ── Firestore ───────────────────────────────────────────────────────────────
 
-const C = { runs: "codex_runs", tasks: "codex_tasks", topics: "codex_topics", questions: "codex_questions" } as const;
+const C = { runs: "codex_runs", tasks: "codex_tasks", topics: "codex_topics", questions: "codex_questions", progress: "codex_progress" } as const;
 
 /** Firestore rejects `undefined` field values; this strips them from nested data. */
 function clean<T>(v: T): T {
@@ -137,7 +161,7 @@ export function createFirestoreStore(): CodexStore {
       });
     },
     async deleteRun(id) {
-      for (const name of [C.tasks, C.topics, C.questions]) {
+      for (const name of [C.tasks, C.topics, C.questions, C.progress]) {
         const snap = await col(name).where("runId", "==", id).get();
         for (let i = 0; i < snap.docs.length; i += 400) {
           const batch = fsdb().batch();
@@ -190,6 +214,19 @@ export function createFirestoreStore(): CodexStore {
     async putQuestion(q) { await col(C.questions).doc(docId(q.runId, q.id)).set(clean(q)); },
     async listQuestions(runId) { return byRun<CodexQuestion>(C.questions, runId); },
     async updateQuestion(runId, id, patch) { await col(C.questions).doc(docId(runId, id)).update(clean(patch)); },
+    async getQuestion(runId, id) { const d = await col(C.questions).doc(docId(runId, id)).get(); return d.exists ? (d.data() as CodexQuestion) : null; },
+    async listProgress(userId, runId) {
+      return (await col(C.progress).where("userId", "==", userId).where("runId", "==", runId).get()).docs.map((d) => d.data() as CodexProgress);
+    },
+    async recordAnswer(a) {
+      const ref = col(C.progress).doc(progressId(a.userId, a.runId, a.qid));
+      return fsdb().runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const next = applyAnswerTo(snap.exists ? (snap.data() as CodexProgress) : undefined, a);
+        tx.set(ref, clean(next));
+        return next;
+      });
+    },
   };
 }
 

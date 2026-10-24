@@ -7,6 +7,7 @@ import CodexNavbar from "./_components/CodexNavbar";
 import { Badge, TEAL, btn, card, fetcher, input } from "./_components/ui";
 import { parseSubCodex } from "../../lib/codex/subcodex";
 import { DEPTH_LABELS } from "../../lib/codex/types";
+import { SUBCODEX_PRESETS, presetText } from "../../lib/codex/presets";
 import type { CodexDepth } from "../../lib/codex/types";
 
 interface RunRow {
@@ -77,6 +78,13 @@ export default function CodexHome() {
               Upload .txt
               <input type="file" accept=".txt,text/plain" hidden onChange={(e) => onFile(e.target.files?.[0])} />
             </label>
+            <select
+              value="" style={{ ...input, width: "auto" }} aria-label="Load a built-in Sub-Codex"
+              onChange={(e) => { const p = SUBCODEX_PRESETS[Number(e.target.value)]; if (p) { setText(presetText(p)); setPicked(null); } }}
+            >
+              <option value="" disabled>Built-in Sub-Codex…</option>
+              {SUBCODEX_PRESETS.map((p, i) => <option key={p.subject} value={i}>{p.subject} ({p.sections.length} sections)</option>)}
+            </select>
             <button style={btn("ghost")} onClick={() => { setText(EXAMPLE); setPicked(null); }}>Use example</button>
             {text && <button style={btn("ghost")} onClick={() => { setText(""); setPicked(null); }}>Clear</button>}
           </div>
