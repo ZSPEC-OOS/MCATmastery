@@ -18,20 +18,15 @@ interface RunRow {
 export default function CodexHome() {
   const router = useRouter();
   const { data, mutate } = useSWR<{ runs: RunRow[] }>("/api/codex/runs", fetcher);
-  const [text, setText] = useState("");
+  const [preset, setPreset] = useState("");   // index into SUBCODEX_PRESETS; "" = nothing chosen
   const [depth, setDepth] = useState<CodexDepth>("verified");
   const [picked, setPicked] = useState<Set<number> | null>(null); // null = all sections
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const parsed = useMemo(() => (text.trim() ? parseSubCodex(text) : null), [text]);
+  const text = useMemo(() => (preset === "" ? "" : presetText(SUBCODEX_PRESETS[Number(preset)])), [preset]);
+  const parsed = useMemo(() => (text ? parseSubCodex(text) : null), [text]);
   const selected = parsed?.ok ? (picked ?? new Set(parsed.sections.map((s) => s.number))) : new Set<number>();
-
-  async function onFile(file: File | undefined) {
-    if (!file) return;
-    setText(await file.text());
-    setPicked(null);
-  }
 
   async function start() {
     setBusy(true); setError("");
@@ -60,42 +55,13 @@ export default function CodexHome() {
       <CodexNavbar />
       <main className="max-w-6xl mx-auto w-full px-4 md:px-6 py-6 flex-1 grid gap-6 lg:grid-cols-5">
         <section className="lg:col-span-3 p-5 space-y-4" style={card}>
-          <div>
-            <h1 className="text-xl" style={{ color: "var(--text-primary)" }}>New run</h1>
-            <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
-              Paste your Sub-Codex or upload a .txt file. Codex plans the topics for each major section, writes one parent question per topic,
-              derives the atomic questions each parent needs, and verifies them. You approve what is kept.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <label style={{ ...btn("ghost"), cursor: "pointer" }}>
-              Upload .txt
-              <input type="file" accept=".txt,text/plain" hidden onChange={(e) => onFile(e.target.files?.[0])} />
-            </label>
-            <select
-              value="" style={{ ...input, width: "auto" }} aria-label="Load a built-in Sub-Codex"
-              onChange={(e) => { const p = SUBCODEX_PRESETS[Number(e.target.value)]; if (p) { setText(presetText(p)); setPicked(null); } }}
-            >
-              <option value="" disabled>Built-in Sub-Codex…</option>
-              {SUBCODEX_PRESETS.map((p, i) => <option key={p.subject} value={i}>{p.subject} ({p.sections.length} sections)</option>)}
-            </select>
-            {text && <button style={btn("ghost")} onClick={() => { setText(""); setPicked(null); }}>Clear</button>}
-          </div>
-
-          <textarea
-            value={text} onChange={(e) => { setText(e.target.value); setPicked(null); }} rows={9} spellCheck={false}
-            placeholder={"Choose a built-in Sub-Codex above, upload a .txt file, or paste one here.\n\nFormat:\nSubject: <subject name>\nMS-1: <first major section>\nMS-2: <second major section>"} style={{ ...input, fontFamily: "ui-monospace, monospace", fontSize: 13 }}
-          />
-
-          {parsed && !parsed.ok && (
-            <ul className="text-sm space-y-1" style={{ color: "var(--accent-red)" }}>
-              {parsed.errors.slice(0, 8).map((e, i) => (
-                <li key={i}>{e.line ? `Line ${e.line}: ` : ""}{e.message}{e.excerpt ? <code style={{ marginLeft: 6, color: "var(--text-muted)" }}>{e.excerpt}</code> : null}</li>
-              ))}
-              {parsed.errors.length > 8 && <li>…and {parsed.errors.length - 8} more.</li>}
-            </ul>
-          )}
+          <select
+            value={preset} style={{ ...input, fontSize: 15 }} aria-label="Choose a subject"
+            onChange={(e) => { setPreset(e.target.value); setPicked(null); }}
+          >
+            <option value="" disabled>Choose a subject…</option>
+            {SUBCODEX_PRESETS.map((p, i) => <option key={p.subject} value={i}>{p.subject} ({p.sections.length} sections)</option>)}
+          </select>
 
           {parsed?.ok && (
             <div className="space-y-3">
