@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getModels, saveModel, updateModelRole, updateModel, deleteModel } from "../../../../lib/firestore";
 
-const KNOWN_ROLES = new Set(["generation", "audit", "formatting", "both", "disabled"]);
+const KNOWN_ROLES = new Set(["generation", "audit", "formatting", "codex", "both", "disabled"]);
 
 function isValidRole(role: unknown): role is string {
   if (typeof role !== "string" || !role) return false;

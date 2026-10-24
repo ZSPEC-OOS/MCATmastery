@@ -20,6 +20,7 @@ const ROLE_OPTIONS = [
   { key: "generation", label: "Question Gen" },
   { key: "audit",      label: "Audit" },
   { key: "formatting", label: "Formatting" },
+  { key: "codex", label: "Codex" },
 ] as const;
 
 function parseRoles(role: string): Set<string> {

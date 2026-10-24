@@ -81,8 +81,9 @@ AI verification (blind solve + scientific review, with bounded automatic correct
 
 - **Isolated from Mastery:** Codex reads and writes only its own Firestore collections (`codex_runs`, `codex_tasks`, `codex_topics`,
   `codex_questions`) and Firebase Storage under `codex/`. It never touches the Mastery question bank.
-- **Shared with Mastery:** the PIN login, the Firebase project, and the AI models configured in Admin → Settings
-  (the *generation* role writes; the *audit* role solves blind and reviews).
+- **Shared with Mastery:** the PIN login, the Firebase project, and the AI models configured in Admin → Settings.
+  Tick **Codex** on a model to make it the model for every Codex call; with none ticked, Codex uses the *generation* model
+  to write and the *audit* model to solve blind and review.
 - **No background worker:** the run page drives the pipeline one task at a time and saves after every step, so you can pause or
   close the page and resume later. Keep the page open while a run is going.
 - Code: `lib/codex/` (engine, prompts, checks, store), `app/api/codex/`, `app/codex/`.
