@@ -13,7 +13,7 @@ export const DEPTH_LABELS: Record<CodexDepth, string> = {
 const DEPTH_RANK: Record<CodexDepth, number> = { topics: 0, parents: 1, atomics: 2, verified: 3 };
 export const depthAtLeast = (d: CodexDepth, min: CodexDepth) => DEPTH_RANK[d] >= DEPTH_RANK[min];
 
-export type CodexStage = "plan" | "parent" | "atomic" | "verify";
+export type CodexStage = "plan" | "expand" | "parent" | "atomic" | "verify";
 export type TaskStatus = "queued" | "running" | "done" | "failed";
 
 /** Question lifecycle. Only a person can move a question to "approved". */
@@ -29,12 +29,15 @@ export const MAX_CORRECTION_ATTEMPTS = 2;
 export const MAX_REPAIR_ROUNDS = 2;
 export const MAX_TASK_ATTEMPTS = 3;
 export const ATOMIC_MAX_PER_PARENT = 12;
+/** Safety bound only: how many separately testable ideas one planned topic may be split into. */
+export const EXPAND_MAX_TARGETS = 30;
 
 // ── IDs ─────────────────────────────────────────────────────────────────────
 
 export const majorSectionId = (n: number) => `MS-${n}`;
 export const subsectionId = (ms: number, ss: number) => `MS-${ms}-SS-${ss}`;
 export const topicId = (ms: number, ss: number, n: number) => `MS-${ms}-SS-${ss}-${n}`;
+export const splitTopicId = (topic: string, n: number) => `${topic}.${n}`;
 export const atomicId = (parent: string, n: number) => `${parent}-A${n}`;
 
 // ── Persisted documents ─────────────────────────────────────────────────────
@@ -72,6 +75,10 @@ export interface CodexTopic {
   scope: string;
   primaryLearningTarget: string;
   correctionAttempts: number;
+  /** Set on a topic that the expand stage split into finer topics (MS-1-SS-1-1.1, .2, ...). Hidden from listings. */
+  expanded?: boolean;
+  /** On a split-off topic: the title of the broader topic it came from. */
+  groupTitle?: string;
 }
 
 export interface CodexTask {

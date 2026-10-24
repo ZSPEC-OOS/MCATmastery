@@ -19,7 +19,7 @@ interface Detail {
 }
 
 const STAGES: { key: keyof Progress["tasks"]; label: string }[] = [
-  { key: "plan", label: "Topic plans" }, { key: "parent", label: "Parent questions" }, { key: "atomic", label: "Atomic sets" }, { key: "verify", label: "Verification" },
+  { key: "plan", label: "Topic plans" }, { key: "expand", label: "Topic splits" }, { key: "parent", label: "Parent questions" }, { key: "atomic", label: "Atomic sets" }, { key: "verify", label: "Verification" },
 ];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -132,7 +132,7 @@ export default function RunPage() {
       )}
       {running && <p className="text-sm mb-3" style={{ color: TEAL }}>Running — keep this page open. It is safe to pause.</p>}
 
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 mb-4">
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 mb-4">
         {STAGES.map(({ key, label }) => {
           const t = progress.tasks[key];
           const total = t.queued + t.running + t.done + t.failed;
@@ -192,7 +192,7 @@ export default function RunPage() {
                       <div key={t.id} style={card}>
                         <button className="w-full text-left p-3 flex items-center gap-2" onClick={() => setOpenTopic(open ? null : t.id)}>
                           <span className="text-xs font-mono" style={{ color: "var(--text-muted)", minWidth: 96 }}>{t.id}</span>
-                          <span className="flex-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{t.title}</span>
+                          <span className="flex-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{t.groupTitle && <span className="block text-xs font-normal" style={{ color: "var(--text-muted)" }}>{t.groupTitle}</span>}{t.title}</span>
                           <span className="text-xs" style={{ color: "var(--text-muted)" }}>{parent ? `1 parent · ${atoms.length} atomic` : "no question yet"}</span>
                         </button>
                         {open && (
