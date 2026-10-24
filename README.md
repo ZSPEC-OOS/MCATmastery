@@ -86,3 +86,8 @@ AI verification (blind solve + scientific review, with bounded automatic correct
 - **No background worker:** the run page drives the pipeline one task at a time and saves after every step, so you can pause or
   close the page and resume later. Keep the page open while a run is going.
 - Code: `lib/codex/` (engine, prompts, checks, store), `app/api/codex/`, `app/codex/`.
+- **Study tab:** works through the questions you approved, in the same layout as Mastery's practice screen (passage panel on the
+  left for CARS, A–D keys, explanation after each answer, plus why each wrong choice is wrong). "Teach me" mode asks the concept
+  question first; if you miss it you work through its foundation questions in order, then retry it. A question counts as
+  mastered after two correct answers in a row. Progress is stored per learner in `codex_progress`.
+

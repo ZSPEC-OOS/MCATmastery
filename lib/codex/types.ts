@@ -150,3 +150,21 @@ export interface CodexQuestion {
 }
 
 export const docId = (runId: string, ...parts: (string | number)[]) => [runId, ...parts].join("__");
+
+// ── Study progress (per learner, per question) ──────────────────────────────
+
+export interface CodexProgress {
+  id: string;               // `${userId}__${runId}__${qid}` (document id)
+  userId: string;
+  runId: string;
+  qid: string;
+  attempts: number;
+  correctCount: number;
+  streak: number;           // consecutive correct answers; mastered at MASTERY_STREAK
+  lastCorrect: boolean;
+  lastAnswer: string;
+  lastAt: string;
+}
+
+export const MASTERY_STREAK = 2;
+export const progressId = (userId: string, runId: string, qid: string) => `${userId}__${runId}__${qid}`;
