@@ -15,11 +15,6 @@ interface RunRow {
   progress: { active: boolean; failed: number; topics: number; questions: Record<string, number> };
 }
 
-const EXAMPLE = `Subject: Biology
-MS-1: Molecular Biology and Genetics
-MS-2: Cell Structure and Function
-MS-3: Organ Systems`;
-
 export default function CodexHome() {
   const router = useRouter();
   const { data, mutate } = useSWR<{ runs: RunRow[] }>("/api/codex/runs", fetcher);
@@ -85,13 +80,12 @@ export default function CodexHome() {
               <option value="" disabled>Built-in Sub-Codex…</option>
               {SUBCODEX_PRESETS.map((p, i) => <option key={p.subject} value={i}>{p.subject} ({p.sections.length} sections)</option>)}
             </select>
-            <button style={btn("ghost")} onClick={() => { setText(EXAMPLE); setPicked(null); }}>Use example</button>
             {text && <button style={btn("ghost")} onClick={() => { setText(""); setPicked(null); }}>Clear</button>}
           </div>
 
           <textarea
             value={text} onChange={(e) => { setText(e.target.value); setPicked(null); }} rows={9} spellCheck={false}
-            placeholder={EXAMPLE} style={{ ...input, fontFamily: "ui-monospace, monospace", fontSize: 13 }}
+            placeholder={"Choose a built-in Sub-Codex above, upload a .txt file, or paste one here.\n\nFormat:\nSubject: <subject name>\nMS-1: <first major section>\nMS-2: <second major section>"} style={{ ...input, fontFamily: "ui-monospace, monospace", fontSize: 13 }}
           />
 
           {parsed && !parsed.ok && (
