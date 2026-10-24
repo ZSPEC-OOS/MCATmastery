@@ -31,6 +31,7 @@ const OptionSchema = z.object({
 const RefSchema = z.object({ citation: text(500), note: z.string().max(500).optional().nullable().transform((v) => v || undefined) });
 
 export const QuestionSchema = z.object({
+  passage: z.string().trim().max(3000).optional().nullable().transform((v) => v || undefined),
   stem: text(4000),
   options: z.array(OptionSchema).length(4),
   correctKey: z.string().transform((s) => s.trim().toUpperCase()).pipe(z.enum(KEYS)),
@@ -53,7 +54,7 @@ const err = (code: string, message: string): Finding => ({ code, severity: "erro
 const warn = (code: string, message: string): Finding => ({ code, severity: "warning", message });
 
 /** Shape + content rules for one question. `purpose` is required only for atomic questions. */
-export function checkQuestion(raw: unknown, opts: { atomic: boolean }): Parsed<QuestionContent> {
+export function checkQuestion(raw: unknown, opts: { atomic: boolean; passage?: "required" }): Parsed<QuestionContent> {
   const parsed = QuestionSchema.safeParse(raw);
   if (!parsed.success) {
     return { ok: false, findings: parsed.error.issues.slice(0, 12).map((i) => err("SCHEMA", `${i.path.join(".") || "question"}: ${i.message}`)) };
@@ -94,6 +95,13 @@ export function checkQuestion(raw: unknown, opts: { atomic: boolean }): Parsed<Q
 
   if (opts.atomic && !q.purpose) findings.push(err("PURPOSE_MISSING", "Every atomic question needs a one-sentence purpose."));
 
+  // CARS parents must bring a short original excerpt; atomics reuse the parent's excerpt (attached by software).
+  if (opts.passage === "required") {
+    const n = q.passage ? words(q.passage) : 0;
+    if (!q.passage) findings.push(err("PASSAGE_MISSING", "A CARS question needs a short original excerpt in the \"passage\" field."));
+    else if (n < 60 || n > 220) findings.push(err("PASSAGE_LENGTH", `The excerpt is ${n} words; write about 80-150 words (60-220 is accepted).`));
+  }
+
   // Warnings (kept, visible to the reviewer)
   const lens = q.options.map((o) => o.text.length);
   const keyLen = q.options.find((o) => o.key === q.correctKey)?.text.length ?? 0;
@@ -105,6 +113,7 @@ export function checkQuestion(raw: unknown, opts: { atomic: boolean }): Parsed<Q
 
   const blocking = findings.some((f) => f.severity === "error");
   const content: QuestionContent = {
+    ...(opts.passage === "required" && q.passage ? { passage: q.passage } : {}),
     stem: q.stem,
     options: KEYS.map((k) => {
       const o = q.options.find((x) => x.key === k)!;
@@ -123,11 +132,12 @@ export function checkQuestion(raw: unknown, opts: { atomic: boolean }): Parsed<Q
 }
 
 /** Checks a parent against already-written sibling stems in the same run. */
-export function checkParent(raw: unknown, siblingStems: string[]): Parsed<QuestionContent> {
-  const r = checkQuestion(raw, { atomic: false });
+export function checkParent(raw: unknown, siblingStems: string[], opts: { cars?: boolean } = {}): Parsed<QuestionContent> {
+  const r = checkQuestion(raw, { atomic: false, ...(opts.cars ? { passage: "required" as const } : {}) });
   if (!r.value) return r;
   const findings = [...r.findings];
-  const top = siblingStems.reduce((m, s) => Math.max(m, similarity(s, r.value!.stem)), 0);
+  const mine = r.value.passage ? `${r.value.passage} ${r.value.stem}` : r.value.stem;
+  const top = siblingStems.reduce((m, s) => Math.max(m, similarity(s, mine)), 0);
   if (top >= 0.85) findings.push(err("SIBLING_DUPLICATE", "The stem is nearly identical to another topic's question."));
   else if (top >= 0.7) findings.push(warn("SIBLING_SIMILAR", "The stem is similar to another topic's question."));
   const blocking = findings.some((f) => f.severity === "error");

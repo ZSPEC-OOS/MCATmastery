@@ -35,6 +35,12 @@ export default function QuestionCard({ q, onDecide }: { q: CodexQuestion; onDeci
         <div className="px-3 pb-3 space-y-3">
           {c.purpose && <p className="text-xs italic" style={{ color: "var(--text-secondary)" }}>Purpose: {c.purpose}</p>}
 
+          {c.passage && (
+            <blockquote className="text-sm leading-relaxed rounded-lg p-3" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderLeft: "3px solid #0d9488", color: "var(--text-primary)" }}>
+              {c.passage}
+            </blockquote>
+          )}
+
           <ul className="space-y-1.5">
             {c.options.map((o) => {
               const key = o.key === c.correctKey;

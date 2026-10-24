@@ -10,7 +10,7 @@
 import type { CodexStore } from "./store";
 import { parseSubCodex } from "./subcodex";
 import {
-  ATOMIC_MAX_PER_PARENT, MAX_CORRECTION_ATTEMPTS, MAX_REPAIR_ROUNDS, MAX_TASK_ATTEMPTS, atomicId, depthAtLeast, subsectionId, topicId,
+  ATOMIC_MAX_PER_PARENT, MAX_CORRECTION_ATTEMPTS, MAX_REPAIR_ROUNDS, MAX_TASK_ATTEMPTS, atomicId, depthAtLeast, isCarsSubject, subsectionId, topicId,
 } from "./types";
 import type {
   CodexDepth, CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, Finding, QuestionContent, QuestionStatus, VerificationRecord,
@@ -212,6 +212,7 @@ async function runPlan(deps: Deps, run: CodexRun, task: CodexTask) {
     maxTokens: 16000,
     render: (repair) =>
       renderPlanningPrompt({
+        cars: isCarsSubject(run.subject),
         subject: run.subject,
         section: { id: section.id, title: section.title },
         outline: run.sections.map((s) => ({ id: s.id, title: s.title })),
@@ -250,20 +251,23 @@ async function runParent(deps: Deps, run: CodexRun, task: CodexTask) {
   if (!topic) throw new ContentFailure(`Unknown topic ${task.targetId}`, []);
   const section = run.sections.find((s) => s.id === topic.sectionId)!;
   const all = await deps.store.listQuestions(run.id);
-  const siblings = all.filter((q) => q.kind === "parent" && q.current && q.qid !== topic.id).map((q) => q.content.stem);
+  const cars = isCarsSubject(run.subject);
+  // For CARS the excerpt is part of the question, so sibling comparison uses excerpt + stem.
+  const siblings = all.filter((q) => q.kind === "parent" && q.current && q.qid !== topic.id).map((q) => (q.content.passage ? `${q.content.passage} ${q.content.stem}` : q.content.stem));
 
   const { value, warnings, model } = await generateValidated(deps, {
     role: "generation",
     maxTokens: 4000,
     render: (repair) =>
       renderParentPrompt({
+        cars,
         subject: run.subject,
         topic: { id: topic.id, title: topic.title, majorSection: section.title, subsection: topic.subsectionTitle, scope: topic.scope, primaryLearningTarget: topic.primaryLearningTarget },
-        siblingStems: siblings,
+        siblingStems: siblings.map((x) => x.slice(-400)),
         ...(task.correction ? { correction: task.correction } : {}),
         ...(repair ? { repair } : {}),
       }),
-    validate: (json) => checkParent(json, siblings),
+    validate: (json) => checkParent(json, siblings, { cars }),
   });
 
   const revision = nextRevision(all, topic.id);
@@ -288,7 +292,8 @@ async function runAtomic(deps: Deps, run: CodexRun, task: CodexTask) {
   if (!parent) throw new ContentFailure(`No current parent question for ${topic.id}`, []);
 
   const topicView = { id: topic.id, title: topic.title, majorSection: section.title, subsection: topic.subsectionTitle, scope: topic.scope, primaryLearningTarget: topic.primaryLearningTarget };
-  const parentView = { stem: parent.content.stem, options: parent.content.options.map((o) => ({ key: o.key, text: o.text })), correctKey: parent.content.correctKey, explanation: parent.content.explanation };
+  const cars = isCarsSubject(run.subject);
+  const parentView = { ...(parent.content.passage ? { passage: parent.content.passage } : {}), stem: parent.content.stem, options: parent.content.options.map((o) => ({ key: o.key, text: o.text })), correctKey: parent.content.correctKey, explanation: parent.content.explanation };
 
   const gen = (extra?: Finding[], previous?: unknown) =>
     generateValidated(deps, {
@@ -296,6 +301,7 @@ async function runAtomic(deps: Deps, run: CodexRun, task: CodexTask) {
       maxTokens: 8000,
       render: (repair) =>
         renderAtomicPrompt({
+          cars,
           subject: run.subject, topic: topicView, parent: parentView,
           ...(task.correction ? { correction: task.correction } : {}),
           ...(extra?.length && !repair ? { repair: { round: 1, previous, findings: extra } } : {}),
@@ -329,9 +335,11 @@ async function runAtomic(deps: Deps, run: CodexRun, task: CodexTask) {
     if (i === 0 && coverage.verdict !== "sufficient") {
       findings.push({ code: "COVERAGE_GAP", severity: "warning", message: coverage.verdict === "insufficient" ? `Coverage reviewer found untested prerequisites: ${coverage.missing.join("; ")}` : "Coverage reviewer could not decide whether the set is sufficient." });
     }
+    // CARS atomics are answered from the parent's excerpt, which software attaches (the model never writes it).
+    const content = parent.content.passage ? { ...items[i], passage: parent.content.passage } : items[i];
     await deps.store.putQuestion({
       id: `${qid}__r${revision}`, runId: run.id, qid, kind: "atomic", parentId: topic.id, topicId: topic.id,
-      revision, current: true, status: "draft", content: items[i], findings, coverage, model: result.model, createdAt: now,
+      revision, current: true, status: "draft", content, findings, coverage, model: result.model, createdAt: now,
     });
   }
   if (depthAtLeast(run.depth, "verified")) {
@@ -368,9 +376,9 @@ async function runVerify(deps: Deps, run: CodexRun, task: CodexTask) {
   const group = [parent, ...atoms];
 
   // Two separate calls: a blind solve (key and explanation withheld) and an audit of the question as written.
-  const blindReq = renderBlindPrompt(group.map((q) => ({ id: q.qid, stem: q.content.stem, options: q.content.options })));
+  const blindReq = renderBlindPrompt(group.map((q) => ({ id: q.qid, passage: q.content.passage, stem: q.content.stem, options: q.content.options })));
   const reviewReq = renderReviewPrompt(group.map((q) => ({
-    id: q.qid, kind: q.kind, stem: q.content.stem, options: q.content.options, correctKey: q.content.correctKey,
+    id: q.qid, kind: q.kind, ...(q.content.passage ? { passage: q.content.passage } : {}), stem: q.content.stem, options: q.content.options, correctKey: q.content.correctKey,
     explanation: q.content.explanation, sourceBasis: q.content.sourceBasis, references: q.content.references,
     ...(q.kind === "atomic" ? { parentId: q.parentId } : {}),
   })));
