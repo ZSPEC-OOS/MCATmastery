@@ -17,6 +17,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       topics: topics.sort((a, b) => a.number - b.number),
       questions: questions.filter((q) => q.current),
       failedTasks: tasks.filter((t) => t.status === "failed" && isCodexStage(t.stage)).map((t) => ({ id: t.id, stage: t.stage, targetId: t.targetId, error: t.error })),
+      // Steps that failed and are waiting to be retried: their latest error, so the page can say what is going wrong.
+      retrying: tasks.filter((t) => t.status === "queued" && t.error && isCodexStage(t.stage)).slice(0, 3).map((t) => ({ id: t.id, stage: t.stage, targetId: t.targetId, error: t.error })),
       progress,
       bankBlockers: bankBlockers(run, progress),
       topicSaveBlockers: topicSaveBlockers(run, progress),

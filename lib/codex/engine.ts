@@ -548,7 +548,7 @@ export function topicSaveBlockers(run: CodexRun, progress: Progress): string[] {
   if (run.topicsSaved) return ["Already saved to the topic database."];
   if (run.depth !== "topics") return ["Only Topics-only runs are saved to the topic database."];
   if (!run.sections.filter((s) => s.selected).every((s) => s.planned)) out.push("Not every major section has been planned.");
-  if (progress.active) out.push("Work remains: press Run until planning and every topic split are finished.");
+  if (progress.active) out.push("Work remains: press Start or Resume until planning and every topic split are finished.");
   if (progress.failed > 0) out.push(`${progress.failed} task(s) failed: retry them first.`);
   if (progress.topics === 0) out.push("No topics yet.");
   return out;
@@ -606,7 +606,7 @@ export function bankBlockers(run: CodexRun, progress: Progress): string[] {
   if (run.banked) return ["Already saved to the database."];
   if (run.depth !== "verified" && run.depth !== "parentsChecked") out.push("Only runs built through AI verification can be saved.");
   if (!run.sections.filter((s) => s.selected).every((s) => s.planned)) out.push("Not every major section has been planned.");
-  if (progress.active) out.push("Work remains: press Run until every stage is finished.");
+  if (progress.active) out.push("Work remains: press Start or Resume until every step is finished.");
   if (progress.failed > 0) out.push(`${progress.failed} task(s) failed: retry them first.`);
   const pending = progress.questions.draft + progress.questions.auto_passed + progress.questions.flagged;
   if (pending > 0) out.push(`${pending} question(s) still need your decision (approve or reject).`);

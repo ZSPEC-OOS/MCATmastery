@@ -17,6 +17,15 @@ interface RunRow {
   progress: { active: boolean; failed: number; topics: number; questions: Record<string, number> };
 }
 
+// One plain sentence per choice, shown under the selector.
+const DEPTH_HELP: Record<CodexDepth, string> = {
+  topics: "Plans each major section and splits it into single-idea topics. No questions. Save the result to the topic database: this is the first step for everything else.",
+  parents: "One parent question per saved topic. No AI check; you approve them (one button approves them all).",
+  parentsChecked: "One parent question per saved topic, checked by AI and approved automatically when it passes. The fastest way to get questions to practice.",
+  atomics: "Parent questions plus the small prerequisite questions behind each one. No AI check; you approve them.",
+  verified: "Everything: parent and atomic questions, the AI check with corrections, then your approval.",
+};
+
 export default function CodexHome() {
   const router = useRouter();
   const { data, mutate } = useSWR<{ runs: RunRow[] }>("/api/codex/runs", fetcher);
@@ -59,7 +68,12 @@ export default function CodexHome() {
   }
 
   async function remove(id: string) {
-    if (!confirm("Delete this run and every question it generated? This cannot be undone.")) return;
+    const r = data?.runs.find((x) => x.id === id);
+    const unsavedTopics = r?.depth === "topics" && !r.topicsSaved;
+    if (!confirm(unsavedTopics
+      ? "Delete this run? Its topics are NOT saved to the topic database, so the planning and splitting work will be lost and have to be paid for again."
+      : r?.depth === "topics" ? "Delete this run? Its topics are already saved to the topic database and are not affected."
+        : "Delete this run and every question it generated? Saved topics are not affected. This cannot be undone.")) return;
     await fetch(`/api/codex/runs/${id}`, { method: "DELETE" });
     mutate();
   }
@@ -116,10 +130,11 @@ export default function CodexHome() {
 
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-[220px]">
-              <label className="block text-xs font-semibold mb-1 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>How far to go</label>
-              <select value={depth} onChange={(e) => setDepth(e.target.value as CodexDepth)} style={input}>
+              <label className="block text-xs font-semibold mb-1 uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>What to build</label>
+              <select value={depth} onChange={(e) => { setDepth(e.target.value as CodexDepth); setPicked(null); }} style={input}>
                 {(Object.keys(DEPTH_LABELS) as CodexDepth[]).map((d) => <option key={d} value={d}>{DEPTH_LABELS[d]}</option>)}
               </select>
+              <p className="text-xs mt-1.5" style={{ color: "var(--text-muted)" }}>{DEPTH_HELP[depth]}</p>
             </div>
             <button style={btn("primary", busy || !parsed?.ok || selected.size === 0)} disabled={busy || !parsed?.ok || selected.size === 0} onClick={start}>
               {busy ? "Starting…" : "Create run"}
@@ -153,7 +168,7 @@ export default function CodexHome() {
                   </span>
                   {r.topicsSaved && <span className="text-xs" style={{ color: TEAL }}>Topics in database ({r.topicsSaved.topics})</span>}
                   {r.progress.failed > 0 && <span className="text-xs" style={{ color: "var(--accent-red)" }}>{r.progress.failed} task(s) failed</span>}
-                  {r.progress.active && <span className="text-xs" style={{ color: "#d97706" }}>unfinished</span>}
+                  {r.progress.active && !r.banked && !r.topicsSaved && <span className="text-xs" style={{ color: "#d97706" }}>unfinished</span>}
                 </div>
               </div>
             );

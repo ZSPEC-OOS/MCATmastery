@@ -5,6 +5,22 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: Codex run page and new-run page made simpler (same approach as Lessons)
+- **One control card:** **Start / Resume** and **Pause** (no Stop), Parallel, one status sentence (Ready / Running / Not
+  running / Finished / Locked), one progress bar for the whole run, and a single line naming each step with work
+  ("Planning 53/53 · Splitting 53/53 · Writing questions 12/124 · AI checks 0/124"). The separate stage cards, including
+  empty 0/0 ones, are gone.
+- **Only the next step is shown.** Save topics to database (Topics-only runs), Approve all that passed the AI check (N),
+  Approve all unchecked (N) and Save to question database appear only when they apply. A blocked save shows one reason
+  ("Before you can save: ...") instead of a bullet list, and nothing about saving appears for depths that cannot be saved.
+- **Advanced (collapsed):** Download with an Approved-only checkbox, and Save approved to Firebase Storage.
+- **Errors are visible:** a "A step is failing and will be retried" box with the latest error, and a "Stopped after
+  repeated errors" message with the error text (same fix as Lessons).
+- **Phones:** a topic's status sits under its title instead of beside it.
+- **New-run page:** "How far to go" is now **What to build**, with one plain sentence under it for each choice. Changing
+  it refreshes the section list. Deleting a Topics-only run whose topics are not saved now warns that the work will be lost.
+- **Untested:** written without installed dependencies, so no type-check beyond syntax and no layout check.
+
 ### Change: parent questions approved automatically when the AI check passes
 - In the **Parent questions only, AI-checked and approved automatically** depth, a parent question that passes AI
   verification (blind solve agrees, scientific review passes, after up to two corrections) becomes **Approved** on its own,

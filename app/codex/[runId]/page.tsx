@@ -15,13 +15,15 @@ interface Detail {
   topics: CodexTopic[];
   questions: CodexQuestion[];
   failedTasks: { id: string; stage: string; targetId: string; error?: string }[];
+  retrying: { id: string; stage: string; targetId: string; error?: string }[];
   progress: Progress;
   bankBlockers: string[];
   topicSaveBlockers: string[];
 }
 
-const STAGES: { key: keyof Progress["tasks"]; label: string }[] = [
-  { key: "plan", label: "Topic plans" }, { key: "expand", label: "Topic splits" }, { key: "parent", label: "Parent questions" }, { key: "atomic", label: "Atomic sets" }, { key: "verify", label: "Verification" },
+// Plain names for the steps, in the order they run.
+const STEPS: { key: keyof Progress["tasks"]; label: string }[] = [
+  { key: "plan", label: "Planning" }, { key: "expand", label: "Splitting" }, { key: "parent", label: "Writing questions" }, { key: "atomic", label: "Atomic sets" }, { key: "verify", label: "AI checks" },
 ];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -34,13 +36,17 @@ export default function RunPage() {
   const [log, setLog] = useState<string[]>([]);
   const [openTopic, setOpenTopic] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [advanced, setAdvanced] = useState(false);
+  const [dlApproved, setDlApproved] = useState(false);
   const live = useRef(false);
   const lastMutate = useRef(0);
+  const lastError = useRef("");
 
   useEffect(() => () => { live.current = false; }, []);
 
   const addLog = useCallback((line: string) => setLog((l) => [`${new Date().toLocaleTimeString()}  ${line}`, ...l].slice(0, 12)), []);
 
+  // The loop that does the work: one step per request, saved after every step. Nothing calls it until you press Start.
   const start = useCallback(async () => {
     if (live.current) return;
     live.current = true; setRunning(true); setNotice("");
@@ -58,12 +64,17 @@ export default function RunPage() {
           await sleep(3000); continue;
         }
         if (!d.ran) {
-          if (d.progress.active) { await sleep(2500); continue; } // other workers busy, or a task is backing off
+          if (d.progress.active) { await sleep(2500); continue; } // other workers busy, or a step is backing off
           break;
         }
         addLog(`${d.ran.stage} ${d.ran.targetId}: ${d.ran.outcome}${d.error ? ` — ${d.error.slice(0, 140)}` : ""}`);
+        if (d.error) lastError.current = `${d.ran.stage} ${d.ran.targetId}: ${d.error.slice(0, 300)}`;
         errors = d.ran.outcome === "done" ? 0 : errors + (d.ran.outcome === "failed" ? 0 : 1);
-        if (errors >= 3) { addLog("Stopped after repeated errors. Check the model in Admin → Settings."); break; }
+        if (errors >= 3) {
+          addLog("Stopped after repeated errors. Check the model in Admin → Settings.");
+          setNotice(`Stopped after repeated errors. ${lastError.current} Check the model in Admin → Settings, then press Resume to try again.`);
+          break;
+        }
         if (Date.now() - lastMutate.current > 1500) { lastMutate.current = Date.now(); mutate(); }
       }
     };
@@ -71,26 +82,29 @@ export default function RunPage() {
     live.current = false; setRunning(false); mutate();
   }, [runId, concurrency, mutate, addLog]);
 
-  const pause = () => { live.current = false; };
+  const pause = () => { live.current = false; setNotice("Pausing. A step already in progress will finish first. Press Resume to continue."); };
+
+  async function post(path: string, body: Record<string, unknown>) {
+    const res = await fetch(`/api/codex/runs/${runId}/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    return { ok: res.ok, d: await res.json() };
+  }
 
   async function decide(q: CodexQuestion, action: "approve" | "reject", override = false) {
-    const res = await fetch(`/api/codex/runs/${runId}/questions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, questionId: q.id, override }) });
-    if (!res.ok) setNotice((await res.json()).error ?? "Could not record the decision");
+    const { ok, d } = await post("questions", { action, questionId: q.id, override });
+    if (!ok) setNotice(d.error ?? "Could not record the decision");
     mutate();
   }
 
   async function approvePassed() {
-    const res = await fetch(`/api/codex/runs/${runId}/questions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "approve_passed" }) });
-    const d = await res.json();
-    setNotice(`Approved ${d.approved ?? 0} question(s) that passed AI review.`);
+    const { d } = await post("questions", { action: "approve_passed" });
+    setNotice(`Approved ${d.approved ?? 0} question(s) that passed the AI check.`);
     mutate();
   }
 
   async function approveDrafts() {
     if (!confirm(`Approve all ${data?.progress.questions.draft ?? 0} unchecked question(s)? No AI check was run on them, so only do this if you have read them or trust them.`)) return;
-    const res = await fetch(`/api/codex/runs/${runId}/questions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "approve_drafts" }) });
-    const d = await res.json();
-    setNotice(res.ok ? `Approved ${d.approved ?? 0} unchecked question(s). They are ready to practice in Study.` : (d.error ?? "Could not approve"));
+    const { ok, d } = await post("questions", { action: "approve_drafts" });
+    setNotice(ok ? `Approved ${d.approved ?? 0} unchecked question(s). They are ready to practice in Study.` : (d.error ?? "Could not approve"));
     mutate();
   }
 
@@ -100,16 +114,15 @@ export default function RunPage() {
   }
 
   async function saveToDatabase() {
-    if (!confirm("Save this run's approved questions to the database? The run will be locked and its sections will disappear from the new-run list until you remove it from the database.")) return;
-    setNotice("Saving to the database…");
-    const res = await fetch(`/api/codex/runs/${runId}/bank`, { method: "POST" });
-    const d = await res.json();
-    setNotice(res.ok ? `Saved ${d.questions} question(s) to the database. This run is now locked.` : (d.errors ?? [d.error]).join(" "));
+    if (!confirm("Save this run's approved questions to the question database? The run will be locked and its sections will disappear from the new-run list until you remove it from the database.")) return;
+    setNotice("Saving to the question database…");
+    const { ok, d } = await post("bank", {});
+    setNotice(ok ? `Saved ${d.questions} question(s) to the database. This run is now locked.` : (d.errors ?? [d.error]).join(" "));
     mutate();
   }
 
   async function removeFromDatabase() {
-    if (!confirm("Remove this run's questions from the database? The run unlocks and its sections return to the new-run list.")) return;
+    if (!confirm("Remove this run's questions from the question database? The run unlocks and its sections return to the new-run list.")) return;
     const res = await fetch(`/api/codex/runs/${runId}/bank`, { method: "DELETE" });
     const d = await res.json();
     setNotice(res.ok ? `Removed ${d.removed} question(s) from the database. This run is unlocked.` : (d.error ?? "Could not remove"));
@@ -119,15 +132,14 @@ export default function RunPage() {
   async function saveTopics() {
     if (!confirm("Save these topics to the topic database? This is permanent: the sections cannot be re-planned or re-split, and they become the shared set that Codex questions and Lessons are built from. The run will be locked.")) return;
     setNotice("Saving to the topic database…");
-    const res = await fetch(`/api/codex/runs/${runId}/topic-bank`, { method: "POST" });
-    const d = await res.json();
-    setNotice(res.ok ? `Saved ${d.topics} topic(s) across ${d.sections} section(s) to the topic database. This run is now locked.` : (d.errors ?? [d.error]).join(" "));
+    const { ok, d } = await post("topic-bank", {});
+    setNotice(ok ? `Saved ${d.topics} topic(s) across ${d.sections} section(s) to the topic database. This run is now locked.` : (d.errors ?? [d.error]).join(" "));
     mutate();
   }
 
-  async function saveToFirebase(approved: boolean) {
-    setNotice("Saving to Firebase Storage…");
-    const res = await fetch(`/api/codex/runs/${runId}/export?save=1${approved ? "&approved=1" : ""}`);
+  async function saveSnapshot() {
+    setNotice("Saving a snapshot to Firebase Storage…");
+    const res = await fetch(`/api/codex/runs/${runId}/export?save=1&approved=1`);
     const d = await res.json();
     setNotice(res.ok ? `Saved to Firebase Storage: ${d.saved.path}` : (d.error ?? "Could not save"));
   }
@@ -135,39 +147,55 @@ export default function RunPage() {
   if (error) return <Shell><p style={{ color: "var(--accent-red)" }}>{error.message}</p></Shell>;
   if (!data) return <Shell><p style={{ color: "var(--text-muted)" }}>Loading…</p></Shell>;
 
-  const { run, topics, questions, progress, failedTasks, bankBlockers, topicSaveBlockers } = data;
+  const { run, topics, questions, progress, failedTasks, retrying, bankBlockers, topicSaveBlockers } = data;
   const topicsRun = run.depth === "topics";
   const banked = run.banked;
   const topicsSaved = run.topicsSaved;
+  const locked = !!banked || !!topicsSaved;
+  const counts = progress.questions;
+  const canSaveQuestions = run.depth === "verified" || run.depth === "parentsChecked";
+  const unchecked = (run.depth === "parents" || run.depth === "atomics") && counts.draft > 0;
   const current = (qid: string) => questions.find((q) => q.qid === qid && q.current);
   const atomsOf = (id: string) => questions.filter((q) => q.parentId === id).sort((a, b) => a.qid.localeCompare(b.qid, undefined, { numeric: true }));
-  const counts = progress.questions;
-  const unfinished = progress.active && !banked && !topicsSaved;
+
+  // One bar for the whole run, and a line naming each step that has work.
+  const steps = STEPS.map((s) => ({ ...s, t: progress.tasks[s.key] })).map((s) => ({ ...s, total: s.t.queued + s.t.running + s.t.done + s.t.failed })).filter((s) => s.total > 0);
+  const done = steps.reduce((n, s) => n + s.t.done, 0);
+  const total = steps.reduce((n, s) => n + s.total, 0);
+  const left = steps.reduce((n, s) => n + s.t.queued + s.t.running, 0);
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  const unfinished = progress.active && !locked;
+  const phase = locked ? "locked" : running ? "running" : unfinished ? (done > 0 ? "paused" : "ready") : total === 0 ? "empty" : "finished";
+
+  const statusText: Record<string, string> = {
+    locked: banked ? "Saved to the question database. This run is locked." : "Topics saved to the topic database. This run is locked.",
+    running: "Running. Keep this page open; it is safe to pause.",
+    paused: `Not running. ${left} step${left === 1 ? "" : "s"} left. Press Resume to continue.`,
+    ready: `Ready. ${left} step${left === 1 ? "" : "s"} queued. Nothing runs until you press Start.`,
+    empty: "Nothing to do.",
+    finished: topicsRun
+      ? "Finished. Planning and splitting are done. Save the topics to the database to build questions and lessons from them."
+      : counts.auto_passed + counts.flagged + counts.draft > 0 ? "Finished writing and checking. Some questions are waiting for you below." : "Finished.",
+  };
+
+  const summary = topicsRun
+    ? `${progress.topics} topic${progress.topics === 1 ? "" : "s"} after splitting`
+    : [`${counts.approved} approved`, counts.auto_passed > 0 && `${counts.auto_passed} awaiting you`, counts.draft > 0 && `${counts.draft} unchecked`, counts.flagged > 0 && `${counts.flagged} flagged`, counts.rejected > 0 && `${counts.rejected} rejected`].filter(Boolean).join(" · ");
+
+  const download = () => { window.location.href = `/api/codex/runs/${runId}/export${dlApproved && !topicsRun ? "?approved=1" : ""}`; };
 
   return (
     <Shell>
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-        <div>
-          <Link href="/codex" className="text-xs" style={{ color: "var(--text-muted)" }}>← All runs</Link>
-          <h1 className="text-2xl" style={{ color: "var(--text-primary)" }}>{run.subject}</h1>
-          <p className="text-xs" style={{ color: "var(--text-muted)" }}>{DEPTH_LABELS[run.depth]} · started {new Date(run.createdAt).toLocaleString()}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="text-xs" style={{ color: "var(--text-muted)" }}>Parallel
-            <select value={concurrency} disabled={running} onChange={(e) => setConcurrency(Number(e.target.value))} style={{ ...input, width: 64, marginLeft: 6, padding: "6px 8px" }}>
-              {[1, 2, 3].map((n) => <option key={n}>{n}</option>)}
-            </select>
-          </label>
-          {running
-            ? <button style={btn("ghost")} onClick={pause}>Pause</button>
-            : <button style={btn("primary", !unfinished)} disabled={!unfinished} onClick={start}>{unfinished ? "Run" : "Finished"}</button>}
-        </div>
+      <div className="mb-4">
+        <Link href="/codex" className="text-xs" style={{ color: "var(--text-muted)" }}>← All runs</Link>
+        <h1 className="text-2xl" style={{ color: "var(--text-primary)" }}>{run.subject}</h1>
+        <p className="text-xs" style={{ color: "var(--text-muted)" }}>{DEPTH_LABELS[run.depth]} · started {new Date(run.createdAt).toLocaleString()}</p>
       </div>
 
       {banked && (
         <div className="p-3 mb-4 text-sm flex flex-wrap items-center justify-between gap-2" style={{ ...card, borderColor: TEAL }}>
           <span style={{ color: "var(--text-secondary)" }}>
-            <b style={{ color: TEAL }}>In the database</b> · {banked.questions} question(s) saved {new Date(banked.at).toLocaleString()}. This run is locked and its sections are hidden from the new-run list.
+            <b style={{ color: TEAL }}>In the question database</b> · {banked.questions} question(s) saved {new Date(banked.at).toLocaleString()}. Its sections are hidden from the new-run list.
           </span>
           <button style={btn("ghost")} onClick={removeFromDatabase}>Remove from database</button>
         </div>
@@ -176,44 +204,80 @@ export default function RunPage() {
       {topicsSaved && (
         <div className="p-3 mb-4 text-sm" style={{ ...card, borderColor: TEAL }}>
           <span style={{ color: "var(--text-secondary)" }}>
-            <b style={{ color: TEAL }}>Topics saved to the database</b> · {topicsSaved.topics} topic(s) saved {new Date(topicsSaved.at).toLocaleString()}. This is permanent: these sections cannot be run again here. Build questions in Codex, or lessons in MCAT Lessons, from them.
+            <b style={{ color: TEAL }}>Topics saved to the database</b> · {topicsSaved.topics} topic(s) saved {new Date(topicsSaved.at).toLocaleString()}. This is permanent. Build questions here in Codex, or lessons in MCAT Lessons, from them.
           </span>
         </div>
       )}
 
-      {unfinished && !running && (
-        <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>
-          Work remains. Press <b>Run</b> to continue — progress is saved after every step, so you can pause or close this page at any time.
-        </p>
-      )}
-      {running && <p className="text-sm mb-3" style={{ color: TEAL }}>Running — keep this page open. It is safe to pause.</p>}
+      <section className="p-4 mb-4 space-y-3" style={card} aria-label="Run controls">
+        {!locked && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button style={btn("primary", running || !unfinished)} disabled={running || !unfinished} onClick={start}>{phase === "paused" ? "Resume" : "Start"}</button>
+            <button style={btn("ghost", !running)} disabled={!running} onClick={pause}>Pause</button>
+            <span className="flex-1" />
+            <label className="text-xs" style={{ color: "var(--text-muted)" }}>Parallel
+              <select value={concurrency} disabled={running} onChange={(e) => setConcurrency(Number(e.target.value))} style={{ ...input, width: 64, marginLeft: 6, padding: "6px 8px" }}>
+                {[1, 2, 3].map((n) => <option key={n}>{n}</option>)}
+              </select>
+            </label>
+          </div>
+        )}
 
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 mb-4">
-        {STAGES.filter(({ key }) => {
-          const t = progress.tasks[key];
-          const total = t.queued + t.running + t.done + t.failed;
-          const early = key === "plan" || key === "expand";
-          if (run.depth === "parentsChecked" && key === "atomic") return false; // this depth has no atomic questions
-          // Topics-only runs show just plan and split; runs built from the topic database skip the cards for work already done.
-          return topicsRun ? early : early ? total > 0 : true;
-        }).map(({ key, label }) => {
-          const t = progress.tasks[key];
-          const total = t.queued + t.running + t.done + t.failed;
-          const pct = total ? Math.round((t.done / total) * 100) : 0;
-          return (
-            <div key={key} className="p-3" style={card}>
-              <div className="flex justify-between text-xs" style={{ color: "var(--text-muted)" }}><span>{label}</span><span>{t.done}/{total}</span></div>
-              <div className="h-1.5 rounded-full mt-2" style={{ background: "var(--bg-input)" }}><div className="h-1.5 rounded-full" style={{ width: `${pct}%`, background: TEAL }} /></div>
-              {t.failed > 0 && <p className="text-xs mt-1" style={{ color: "var(--accent-red)" }}>{t.failed} failed</p>}
+        <p className="text-sm" style={{ color: phase === "running" ? TEAL : "var(--text-secondary)" }}>{statusText[phase]}</p>
+
+        {total > 0 && (
+          <div>
+            <div className="flex justify-between text-xs mb-1" style={{ color: "var(--text-muted)" }}><span>Progress</span><span>{done}/{total} steps</span></div>
+            <div className="h-1.5 rounded-full" style={{ background: "var(--bg-input)" }}><div className="h-1.5 rounded-full" style={{ width: `${pct}%`, background: TEAL }} /></div>
+            <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
+              {steps.map((s) => `${s.label} ${s.t.done}/${s.total}`).join(" · ")}
+            </p>
+            {summary && <p className="text-xs mt-1" style={{ color: "var(--text-secondary)" }}>{summary}</p>}
+          </div>
+        )}
+
+        {/* The next thing to do, only when there is something to do. */}
+        {(!locked && ((topicsRun && progress.topics > 0) || counts.auto_passed > 0 || unchecked || (canSaveQuestions && counts.approved > 0))) && (
+          <div className="flex flex-wrap items-center gap-2 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+            {topicsRun && <button style={btn("primary", topicSaveBlockers.length > 0)} disabled={topicSaveBlockers.length > 0} onClick={saveTopics}>Save topics to database</button>}
+            {counts.auto_passed > 0 && <button style={btn("primary")} onClick={approvePassed}>Approve all that passed the AI check ({counts.auto_passed})</button>}
+            {unchecked && <button style={btn("ghost")} onClick={approveDrafts}>Approve all unchecked ({counts.draft})</button>}
+            {!topicsRun && canSaveQuestions && counts.approved > 0 && <button style={btn("primary", bankBlockers.length > 0)} disabled={bankBlockers.length > 0} onClick={saveToDatabase}>Save to question database</button>}
+            {topicsRun && topicSaveBlockers.length > 0 && <p className="basis-full text-xs" style={{ color: "var(--text-muted)" }}>Before you can save: {topicSaveBlockers[0]}</p>}
+            {!topicsRun && canSaveQuestions && counts.approved > 0 && bankBlockers.length > 0 && <p className="basis-full text-xs" style={{ color: "var(--text-muted)" }}>Before you can save to the question database: {bankBlockers[0]}</p>}
+          </div>
+        )}
+
+        <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+          <button className="text-xs font-semibold" style={{ color: "var(--text-muted)" }} aria-expanded={advanced} onClick={() => setAdvanced((v) => !v)}>
+            Advanced {advanced ? "▾" : "▸"}
+          </button>
+          {advanced && (
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              <button style={btn("ghost")} onClick={download}>Download{topicsRun ? " topics" : ""}</button>
+              {!topicsRun && <label className="flex items-center gap-2 text-sm" style={{ color: "var(--text-secondary)" }}><input type="checkbox" checked={dlApproved} onChange={(e) => setDlApproved(e.target.checked)} />Approved only</label>}
+              {!topicsRun && <button style={btn("ghost", counts.approved === 0)} disabled={counts.approved === 0} onClick={saveSnapshot}>Save approved to Firebase Storage</button>}
             </div>
-          );
-        })}
+          )}
+        </div>
       </section>
+
+      {notice && <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>{notice}</p>}
+
+      {retrying.length > 0 && (
+        <div className="p-3 mb-4 text-sm" style={{ ...card, borderColor: "#d97706" }}>
+          <b style={{ color: "#d97706" }}>A step is failing and will be retried</b>
+          <ul className="mt-2 text-xs space-y-1" style={{ color: "var(--text-secondary)" }}>
+            {retrying.map((t) => <li key={t.id}><code>{t.id}</code>: {t.error}</li>)}
+          </ul>
+          <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>If this keeps happening, check the model settings in Admin → Settings.</p>
+        </div>
+      )}
 
       {failedTasks.length > 0 && (
         <div className="p-3 mb-4 text-sm" style={{ ...card, borderColor: "var(--accent-red)" }}>
           <div className="flex items-center justify-between gap-2">
-            <b style={{ color: "var(--accent-red)" }}>{failedTasks.length} task(s) failed</b>
+            <b style={{ color: "var(--accent-red)" }}>{failedTasks.length} step(s) failed</b>
             <button style={btn("ghost", !!banked)} disabled={!!banked} onClick={retry}>Retry failed</button>
           </div>
           <ul className="mt-2 text-xs space-y-1" style={{ color: "var(--text-secondary)" }}>
@@ -221,43 +285,6 @@ export default function RunPage() {
           </ul>
         </div>
       )}
-
-      {topicsRun && (
-        <section className="p-3 mb-4 flex flex-wrap items-center gap-2" style={card}>
-          <span className="text-sm mr-2" style={{ color: "var(--text-secondary)" }}><b>{progress.topics}</b> topic(s) after splitting</span>
-          <span className="flex-1" />
-          <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/codex/runs/${runId}/export`}>Download topics</a>
-          {!topicsSaved && <button style={btn("primary", topicSaveBlockers.length > 0)} disabled={topicSaveBlockers.length > 0} onClick={saveTopics}>Save topics to database</button>}
-          {!topicsSaved && topicSaveBlockers.length > 0 && progress.topics > 0 && (
-            <ul className="basis-full text-xs list-disc pl-5" style={{ color: "var(--text-muted)" }}>
-              {topicSaveBlockers.map((b) => <li key={b}>{b}</li>)}
-            </ul>
-          )}
-        </section>
-      )}
-
-      {!topicsRun && (
-      <section className="p-3 mb-4 flex flex-wrap items-center gap-2" style={card}>
-        <span className="text-sm mr-2" style={{ color: "var(--text-secondary)" }}>
-          <b>{counts.approved}</b> approved · <b>{counts.auto_passed}</b> awaiting you · <b>{counts.flagged}</b> flagged · <b>{counts.rejected}</b> rejected
-        </span>
-        <span className="flex-1" />
-        <button style={btn("ghost", counts.auto_passed === 0 || !!banked)} disabled={counts.auto_passed === 0 || !!banked} onClick={approvePassed}>Approve all that passed AI review</button>
-        {(run.depth === "parents" || run.depth === "atomics") && counts.draft > 0 && !banked && (
-          <button style={btn("ghost")} onClick={approveDrafts}>Approve all unchecked ({counts.draft})</button>
-        )}
-        <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/codex/runs/${runId}/export?approved=1`}>Download approved</a>
-        <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/codex/runs/${runId}/export`}>Download everything</a>
-        <button style={btn("ghost", counts.approved === 0)} disabled={counts.approved === 0} onClick={() => saveToFirebase(true)}>Save approved to Firebase</button>
-        {!banked && <button style={btn("primary", bankBlockers.length > 0)} disabled={bankBlockers.length > 0} onClick={saveToDatabase}>Save to database</button>}
-        {!banked && bankBlockers.length > 0 && progress.topics > 0 && (
-          <ul className="basis-full text-xs list-disc pl-5" style={{ color: "var(--text-muted)" }}>
-            {bankBlockers.map((b) => <li key={b}>{b}</li>)}
-          </ul>
-        )}
-      </section>
-      )}
-      {notice && <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>{notice}</p>}
 
       <div className="space-y-6">
         {run.sections.filter((s) => s.selected).map((s) => (
@@ -276,12 +303,17 @@ export default function RunPage() {
                     const parent = current(t.id);
                     const atoms = atomsOf(t.id);
                     const open = openTopic === t.id;
+                    const status = topicsRun ? "" : parent ? `1 question${atoms.length ? ` · ${atoms.length} atomic` : ""}` : "no question yet";
                     return (
                       <div key={t.id} style={card}>
-                        <button className="w-full text-left p-3 flex items-center gap-2" onClick={() => setOpenTopic(open ? null : t.id)}>
-                          <span className="text-xs font-mono" style={{ color: "var(--text-muted)", minWidth: 96 }}>{t.id}</span>
-                          <span className="flex-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{t.groupTitle && <span className="block text-xs font-normal" style={{ color: "var(--text-muted)" }}>{t.groupTitle}</span>}{t.title}</span>
-                          <span className="text-xs" style={{ color: "var(--text-muted)" }}>{topicsRun ? "" : parent ? `1 parent · ${atoms.length} atomic` : "no question yet"}</span>
+                        <button className="w-full text-left p-3 flex items-start gap-2" aria-expanded={open} onClick={() => setOpenTopic(open ? null : t.id)}>
+                          <span className="text-xs font-mono mt-0.5 shrink-0" style={{ color: "var(--text-muted)", minWidth: 88 }}>{t.id}</span>
+                          <span className="flex-1 min-w-0">
+                            {t.groupTitle && <span className="block text-xs" style={{ color: "var(--text-muted)" }}>{t.groupTitle}</span>}
+                            <span className="block text-sm font-medium" style={{ color: "var(--text-primary)" }}>{t.title}</span>
+                            {status && <span className="block sm:hidden text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>{status}</span>}
+                          </span>
+                          {status && <span className="hidden sm:inline text-xs mt-0.5 whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{status}</span>}
                         </button>
                         {open && (
                           <div className="px-3 pb-3 space-y-2">
