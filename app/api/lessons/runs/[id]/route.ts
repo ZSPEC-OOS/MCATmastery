@@ -17,6 +17,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       topics: topics.sort((a, b) => a.number - b.number),
       lessons: assembleLessons(run, topics, parts, reviews, tasks, aiReviews),
       failedTasks: tasks.filter((t) => t.status === "failed" && isLessonStage(t.stage)).map((t) => ({ id: t.id, stage: t.stage, targetId: t.targetId, error: t.error })),
+      // Steps that failed and are waiting to be retried: their latest error, so the page can say what is going wrong.
+      retrying: tasks.filter((t) => t.status === "queued" && t.error && isLessonStage(t.stage)).slice(0, 3).map((t) => ({ id: t.id, stage: t.stage, targetId: t.targetId, error: t.error })),
       progress,
     });
   } catch (e) {

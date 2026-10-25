@@ -13,6 +13,7 @@ interface Detail {
   run: Omit<LessonsRun, "sourceText">;
   lessons: Lesson[];
   failedTasks: { id: string; stage: string; targetId: string; error?: string }[];
+  retrying: { id: string; stage: string; targetId: string; error?: string }[];
   progress: Progress;
 }
 
@@ -31,6 +32,7 @@ export default function RunPage() {
   const [dlApproved, setDlApproved] = useState(false);
   const [dlPick, setDlPick] = useState<Set<string>>(new Set());
   const live = useRef(false);
+  const lastError = useRef("");
   const lastMutate = useRef(0);
 
   useEffect(() => () => { live.current = false; }, []);
@@ -59,8 +61,13 @@ export default function RunPage() {
           break;
         }
         addLog(`${d.ran.stage === "review" ? "AI check" : "write"} ${d.ran.targetId}: ${d.ran.outcome}${d.error ? ` — ${d.error.slice(0, 140)}` : ""}`);
+        if (d.error) lastError.current = `${d.ran.stage === "review" ? "AI check" : "Writing"} ${d.ran.targetId}: ${d.error.slice(0, 300)}`;
         errors = d.ran.outcome === "done" ? 0 : errors + (d.ran.outcome === "failed" ? 0 : 1);
-        if (errors >= 3) { addLog("Stopped after repeated errors. Check the model in Admin → Settings."); break; }
+        if (errors >= 3) {
+          addLog("Stopped after repeated errors. Check the model in Admin → Settings.");
+          setNotice(`Stopped after repeated errors. ${lastError.current} Check the model in Admin → Settings, then press Start to try again.`);
+          break;
+        }
         if (Date.now() - lastMutate.current > 1500) { lastMutate.current = Date.now(); mutate(); }
       }
     };
@@ -122,7 +129,7 @@ export default function RunPage() {
   if (error) return <Shell><p style={{ color: "var(--accent-red)" }}>{error.message}</p></Shell>;
   if (!data) return <Shell><p style={{ color: "var(--text-muted)" }}>Loading…</p></Shell>;
 
-  const { run, lessons, progress, failedTasks } = data;
+  const { run, lessons, progress, failedTasks, retrying } = data;
   const L = progress.lessons;
   const waiting = progress.tasks.lesson.queued + progress.tasks.lesson.running + progress.tasks.review.queued + progress.tasks.review.running;
   const paused = run.lessonsPaused === true;
@@ -217,6 +224,15 @@ export default function RunPage() {
         </div>
       </section>
       {notice && <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>{notice}</p>}
+      {retrying.length > 0 && (
+        <div className="p-3 mb-4 text-sm" style={{ ...card, borderColor: "#d97706" }}>
+          <b style={{ color: "#d97706" }}>A step is failing and will be retried</b>
+          <ul className="mt-2 text-xs space-y-1" style={{ color: "var(--text-secondary)" }}>
+            {retrying.map((t) => <li key={t.id}>{t.stage === "review" ? "AI check" : "Writing"} <code>{t.targetId}</code>: {t.error}</li>)}
+          </ul>
+          <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>If this keeps happening, check the model settings in Admin → Settings (the AI check uses the audit model).</p>
+        </div>
+      )}
       {finished && L.flagged > 0 && <p className="text-sm mb-3" style={{ color: "var(--accent-red)" }}>{L.flagged} lesson(s) still had errors after the AI check and corrections. Open them to decide.</p>}
 
       {failedTasks.length > 0 && (
