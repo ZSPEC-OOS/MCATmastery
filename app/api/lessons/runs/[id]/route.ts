@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProgress } from "../../../../../lib/lessons/engine";
+import { isLessonStage } from "../../../../../lib/lessons/types";
 import { errorResponse, getDeps, isDenied, requireLessonsUser } from "../../../../../lib/lessons/runtime";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -15,7 +16,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       run: { ...run, sourceText: undefined },
       topics: topics.sort((a, b) => a.number - b.number),
       lessons,
-      failedTasks: tasks.filter((t) => t.status === "failed").map((t) => ({ id: t.id, stage: t.stage, targetId: t.targetId, error: t.error })),
+      failedTasks: tasks.filter((t) => t.status === "failed" && isLessonStage(t.stage)).map((t) => ({ id: t.id, stage: t.stage, targetId: t.targetId, error: t.error })),
       progress,
     });
   } catch (e) {

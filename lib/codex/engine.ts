@@ -9,12 +9,14 @@
 // run, and any later visit resumes it. Everything is idempotent per task id.
 
 import type { CodexStore } from "./store";
+import { bankSectionId, bankTopicId } from "../topicbank";
+import type { BankSection, BankTopic, TopicBank } from "../topicbank";
 import { parseSubCodex } from "./subcodex";
 import {
   ATOMIC_MAX_PER_PARENT, MAX_CORRECTION_ATTEMPTS, MAX_REPAIR_ROUNDS, isCodexStage, MAX_TASK_ATTEMPTS, atomicId, depthAtLeast, isCarsSubject, splitTopicId, subsectionId, topicId,
 } from "./types";
 import type {
-  BankQuestion, CodexDepth, CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, Finding, QuestionContent, QuestionStatus, VerificationRecord,
+  BankQuestion, CodexDepth, CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, Finding, QuestionContent, QuestionStatus, RunSection, VerificationRecord,
 } from "./types";
 import { checkAtomicSet, checkExpansion, checkParent, checkPlan } from "./checks";
 import {
@@ -31,6 +33,7 @@ export interface ModelCaller {
 
 export interface Deps {
   store: CodexStore;
+  bank: TopicBank;
   model: ModelCaller;
   now?: () => Date;
 }
@@ -59,12 +62,27 @@ export interface CreateRunInput {
 export async function createRun(deps: Deps, input: CreateRunInput): Promise<{ ok: true; run: CodexRun } | { ok: false; errors: ReturnType<typeof parseSubCodex>["errors"] }> {
   const parsed = parseSubCodex(input.sourceText);
   if (!parsed.ok || !parsed.subject) return { ok: false, errors: parsed.errors };
+  const fail = (code: string, message: string) => ({ ok: false as const, errors: [{ line: null, code, message }] });
 
-  const banked = bankedSectionNumbers(await deps.store.listRuns(), parsed.subject);
-  const wanted = new Set((input.sectionNumbers?.length ? input.sectionNumbers : parsed.sections.map((s) => s.number)).filter((n) => !banked.has(n)));
-  if (wanted.size === 0 && banked.size > 0) {
-    return { ok: false, errors: [{ line: null, code: "BANKED", message: "Every selected section is already saved to the database. Open its run and choose Remove from database to build it again." }] };
+  // The shared topic database decides what each depth may build. "Topics only" plans and splits sections that are not
+  // saved yet (and, once saved, is the only time that work is ever done). Every other depth builds questions on top of
+  // sections whose topics are already saved.
+  const savedSections = await deps.bank.listSections(parsed.subject);
+  const saved = new Map(savedSections.map((s) => [s.number, s]));
+  const requested = input.sectionNumbers?.length ? input.sectionNumbers : parsed.sections.map((s) => s.number);
+  const topicsOnly = input.depth === "topics";
+  let chosen: number[];
+  if (topicsOnly) {
+    chosen = requested.filter((n) => !saved.has(n));
+    if (chosen.length === 0 && saved.size > 0) return fail("ALREADY_SAVED", "Every selected section is already saved in the topic database, which is permanent. Build questions or lessons from it instead.");
+  } else {
+    const missing = requested.filter((n) => !saved.has(n));
+    if (missing.length > 0) return fail("NOT_SAVED", `MS-${missing.join(", MS-")} ${missing.length === 1 ? "is" : "are"} not in the topic database yet. Run Topics only for it and save it to the database first.`);
+    const banked = bankedSectionNumbers(await deps.store.listRuns(), parsed.subject);
+    chosen = requested.filter((n) => !banked.has(n));
+    if (chosen.length === 0 && banked.size > 0) return fail("BANKED", "Every selected section is already saved to the question database. Open its run and choose Remove from database to build it again.");
   }
+  const wanted = new Set(chosen);
   const now = iso(nowOf(deps));
   const id = `run_${now.replace(/\D/g, "").slice(0, 14)}_${Math.random().toString(36).slice(2, 7)}`;
   const run: CodexRun = {
@@ -75,12 +93,26 @@ export async function createRun(deps: Deps, input: CreateRunInput): Promise<{ ok
     status: "active",
     createdAt: now,
     createdBy: input.createdBy,
-    sections: parsed.sections.map((s) => ({ number: s.number, id: s.id, title: s.title, selected: wanted.has(s.number), planned: false, subsections: [] })),
+    sections: parsed.sections.map((s) => {
+      const base = { number: s.number, id: s.id, title: s.title, selected: wanted.has(s.number), planned: false, subsections: [] as RunSection["subsections"] };
+      const b = saved.get(s.number);
+      // A section built from the topic database is already planned and split.
+      return !topicsOnly && b && wanted.has(s.number) ? { ...base, planned: true, coverageSummary: b.coverageSummary, declaredGaps: b.declaredGaps, subsections: b.subsections } : base;
+    }),
   };
-  if (!run.sections.some((s) => s.selected)) return { ok: false, errors: [{ line: null, code: "NO_SELECTION", message: "Select at least one major section." }] };
+  if (!run.sections.some((s) => s.selected)) return fail("NO_SELECTION", "Select at least one major section.");
 
   await deps.store.createRun(run);
-  await deps.store.putTasks(run.sections.filter((s) => s.selected).map((s) => newTask(run.id, "plan", s.id, now)));
+  if (topicsOnly) {
+    await deps.store.putTasks(run.sections.filter((s) => s.selected).map((s) => newTask(run.id, "plan", s.id, now)));
+  } else {
+    const topics: CodexTopic[] = (await deps.bank.listTopics(parsed.subject, chosen)).map((t) => ({
+      id: t.topicId, runId: run.id, sectionId: t.sectionId, subsectionId: t.subsectionId, subsectionTitle: t.subsectionTitle, number: t.number,
+      title: t.title, scope: t.scope, primaryLearningTarget: t.primaryLearningTarget, correctionAttempts: 0, ...(t.groupTitle ? { groupTitle: t.groupTitle } : {}),
+    }));
+    await deps.store.putTopics(topics);
+    await deps.store.putTasks(topics.map((t) => newTask(run.id, "parent", t.id, now, "__r1")));
+  }
   return { ok: true, run };
 }
 
@@ -138,7 +170,7 @@ export async function advance(deps: Deps, runId: string): Promise<AdvanceResult>
   const { store } = deps;
   const run = await store.getRun(runId);
   if (!run) throw new Error("Run not found");
-  if (run.status === "cancelled" || run.banked) return { ran: null, progress: await getProgress(store, runId) };
+  if (run.status === "cancelled" || run.banked || run.topicsSaved) return { ran: null, progress: await getProgress(store, runId) };
 
   const task = await store.claimNextTask(runId, nowOf(deps), LEASE_MS);
   if (!task) return { ran: null, progress: await getProgress(store, runId) };
@@ -501,6 +533,57 @@ async function runVerify(deps: Deps, run: CodexRun, task: CodexTask) {
     else if (hasError) status = "flagged";
     await store.updateQuestion(run.id, q.id, { findings: [...structural, ...findings], verification, status });
   }
+}
+
+// ── Topic database ──────────────────────────────────────────────────────────
+
+/** Why a Topics-only run cannot be saved to the topic database yet. Empty means it can. */
+export function topicSaveBlockers(run: CodexRun, progress: Progress): string[] {
+  const out: string[] = [];
+  if (run.topicsSaved) return ["Already saved to the topic database."];
+  if (run.depth !== "topics") return ["Only Topics-only runs are saved to the topic database."];
+  if (!run.sections.filter((s) => s.selected).every((s) => s.planned)) out.push("Not every major section has been planned.");
+  if (progress.active) out.push("Work remains: press Run until planning and every topic split are finished.");
+  if (progress.failed > 0) out.push(`${progress.failed} task(s) failed: retry them first.`);
+  if (progress.topics === 0) out.push("No topics yet.");
+  return out;
+}
+
+/** Permanently saves the run's major sections and split topics to the shared topic database, and locks the run. */
+export async function saveTopicsToBank(deps: Deps, runId: string, now: Date): Promise<{ ok: true; sections: number; topics: number } | { ok: false; errors: string[] }> {
+  const { store, bank } = deps;
+  const run = await store.getRun(runId);
+  if (!run) return { ok: false, errors: ["Run not found"] };
+  const blockers = topicSaveBlockers(run, await getProgress(store, runId));
+  if (blockers.length) return { ok: false, errors: blockers };
+
+  const topics = await store.listTopics(runId);
+  const at = iso(now);
+  const sections: BankSection[] = [];
+  const rows: BankTopic[] = [];
+  for (const s of run.sections.filter((x) => x.selected)) {
+    const mine = topics.filter((t) => t.sectionId === s.id);
+    if (mine.length === 0) return { ok: false, errors: [`${s.id} has no topics; it cannot be saved.`] };
+    sections.push({
+      id: bankSectionId(run.subject, s.number), subject: run.subject, number: s.number, sectionId: s.id, title: s.title,
+      ...(s.coverageSummary ? { coverageSummary: s.coverageSummary } : {}), ...(s.declaredGaps ? { declaredGaps: s.declaredGaps } : {}),
+      subsections: s.subsections, topicCount: mine.length, sourceRunId: run.id, savedAt: at,
+    });
+    for (const t of mine) {
+      rows.push({
+        id: bankTopicId(run.subject, t.id), subject: run.subject, sectionNumber: s.number, sectionId: s.id, subsectionId: t.subsectionId,
+        subsectionTitle: t.subsectionTitle, topicId: t.id, number: t.number, title: t.title, scope: t.scope,
+        primaryLearningTarget: t.primaryLearningTarget, ...(t.groupTitle ? { groupTitle: t.groupTitle } : {}), savedAt: at,
+      });
+    }
+  }
+  try {
+    await bank.save(sections, rows);
+  } catch (e) {
+    return { ok: false, errors: [e instanceof Error ? e.message : "Could not save to the topic database."] };
+  }
+  await store.updateRun(runId, { topicsSaved: { at, topics: rows.length } });
+  return { ok: true, sections: sections.length, topics: rows.length };
 }
 
 // ── Codex database (final bank) ─────────────────────────────────────────────

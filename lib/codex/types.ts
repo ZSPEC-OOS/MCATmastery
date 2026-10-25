@@ -4,7 +4,7 @@
 export type CodexDepth = "topics" | "parents" | "atomics" | "verified";
 
 export const DEPTH_LABELS: Record<CodexDepth, string> = {
-  topics:   "Topics only",
+  topics:   "Topics only (builds the topic database)",
   parents:  "Through parent questions",
   atomics:  "Through atomic questions",
   verified: "Complete, with AI verification",
@@ -73,6 +73,8 @@ export interface CodexRun {
   createdBy: string;
   /** While set, the run is locked and its sections are hidden from the new-run picker. */
   banked?: RunBanked;
+  /** Set when a Topics-only run has been saved to the shared topic database. The run is then locked for good. */
+  topicsSaved?: { at: string; topics: number };
 }
 
 export interface CodexTopic {

@@ -17,6 +17,7 @@ interface Detail {
   failedTasks: { id: string; stage: string; targetId: string; error?: string }[];
   progress: Progress;
   bankBlockers: string[];
+  topicSaveBlockers: string[];
 }
 
 const STAGES: { key: keyof Progress["tasks"]; label: string }[] = [
@@ -107,6 +108,15 @@ export default function RunPage() {
     mutate();
   }
 
+  async function saveTopics() {
+    if (!confirm("Save these topics to the topic database? This is permanent: the sections cannot be re-planned or re-split, and they become the shared set that Codex questions and Lessons are built from. The run will be locked.")) return;
+    setNotice("Saving to the topic database…");
+    const res = await fetch(`/api/codex/runs/${runId}/topic-bank`, { method: "POST" });
+    const d = await res.json();
+    setNotice(res.ok ? `Saved ${d.topics} topic(s) across ${d.sections} section(s) to the topic database. This run is now locked.` : (d.errors ?? [d.error]).join(" "));
+    mutate();
+  }
+
   async function saveToFirebase(approved: boolean) {
     setNotice("Saving to Firebase Storage…");
     const res = await fetch(`/api/codex/runs/${runId}/export?save=1${approved ? "&approved=1" : ""}`);
@@ -117,12 +127,14 @@ export default function RunPage() {
   if (error) return <Shell><p style={{ color: "var(--accent-red)" }}>{error.message}</p></Shell>;
   if (!data) return <Shell><p style={{ color: "var(--text-muted)" }}>Loading…</p></Shell>;
 
-  const { run, topics, questions, progress, failedTasks, bankBlockers } = data;
+  const { run, topics, questions, progress, failedTasks, bankBlockers, topicSaveBlockers } = data;
+  const topicsRun = run.depth === "topics";
   const banked = run.banked;
+  const topicsSaved = run.topicsSaved;
   const current = (qid: string) => questions.find((q) => q.qid === qid && q.current);
   const atomsOf = (id: string) => questions.filter((q) => q.parentId === id).sort((a, b) => a.qid.localeCompare(b.qid, undefined, { numeric: true }));
   const counts = progress.questions;
-  const unfinished = progress.active && !banked;
+  const unfinished = progress.active && !banked && !topicsSaved;
 
   return (
     <Shell>
@@ -153,6 +165,14 @@ export default function RunPage() {
         </div>
       )}
 
+      {topicsSaved && (
+        <div className="p-3 mb-4 text-sm" style={{ ...card, borderColor: TEAL }}>
+          <span style={{ color: "var(--text-secondary)" }}>
+            <b style={{ color: TEAL }}>Topics saved to the database</b> · {topicsSaved.topics} topic(s) saved {new Date(topicsSaved.at).toLocaleString()}. This is permanent: these sections cannot be run again here. Build questions in Codex, or lessons in MCAT Lessons, from them.
+          </span>
+        </div>
+      )}
+
       {unfinished && !running && (
         <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>
           Work remains. Press <b>Run</b> to continue — progress is saved after every step, so you can pause or close this page at any time.
@@ -161,7 +181,13 @@ export default function RunPage() {
       {running && <p className="text-sm mb-3" style={{ color: TEAL }}>Running — keep this page open. It is safe to pause.</p>}
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 mb-4">
-        {STAGES.map(({ key, label }) => {
+        {STAGES.filter(({ key }) => {
+          const t = progress.tasks[key];
+          const total = t.queued + t.running + t.done + t.failed;
+          const early = key === "plan" || key === "expand";
+          // Topics-only runs show just plan and split; runs built from the topic database skip the cards for work already done.
+          return topicsRun ? early : early ? total > 0 : true;
+        }).map(({ key, label }) => {
           const t = progress.tasks[key];
           const total = t.queued + t.running + t.done + t.failed;
           const pct = total ? Math.round((t.done / total) * 100) : 0;
@@ -187,6 +213,21 @@ export default function RunPage() {
         </div>
       )}
 
+      {topicsRun && (
+        <section className="p-3 mb-4 flex flex-wrap items-center gap-2" style={card}>
+          <span className="text-sm mr-2" style={{ color: "var(--text-secondary)" }}><b>{progress.topics}</b> topic(s) after splitting</span>
+          <span className="flex-1" />
+          <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/codex/runs/${runId}/export`}>Download topics</a>
+          {!topicsSaved && <button style={btn("primary", topicSaveBlockers.length > 0)} disabled={topicSaveBlockers.length > 0} onClick={saveTopics}>Save topics to database</button>}
+          {!topicsSaved && topicSaveBlockers.length > 0 && progress.topics > 0 && (
+            <ul className="basis-full text-xs list-disc pl-5" style={{ color: "var(--text-muted)" }}>
+              {topicSaveBlockers.map((b) => <li key={b}>{b}</li>)}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {!topicsRun && (
       <section className="p-3 mb-4 flex flex-wrap items-center gap-2" style={card}>
         <span className="text-sm mr-2" style={{ color: "var(--text-secondary)" }}>
           <b>{counts.approved}</b> approved · <b>{counts.auto_passed}</b> awaiting you · <b>{counts.flagged}</b> flagged · <b>{counts.rejected}</b> rejected
@@ -203,6 +244,7 @@ export default function RunPage() {
           </ul>
         )}
       </section>
+      )}
       {notice && <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>{notice}</p>}
 
       <div className="space-y-6">
@@ -227,7 +269,7 @@ export default function RunPage() {
                         <button className="w-full text-left p-3 flex items-center gap-2" onClick={() => setOpenTopic(open ? null : t.id)}>
                           <span className="text-xs font-mono" style={{ color: "var(--text-muted)", minWidth: 96 }}>{t.id}</span>
                           <span className="flex-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{t.groupTitle && <span className="block text-xs font-normal" style={{ color: "var(--text-muted)" }}>{t.groupTitle}</span>}{t.title}</span>
-                          <span className="text-xs" style={{ color: "var(--text-muted)" }}>{parent ? `1 parent · ${atoms.length} atomic` : "no question yet"}</span>
+                          <span className="text-xs" style={{ color: "var(--text-muted)" }}>{topicsRun ? "" : parent ? `1 parent · ${atoms.length} atomic` : "no question yet"}</span>
                         </button>
                         {open && (
                           <div className="px-3 pb-3 space-y-2">

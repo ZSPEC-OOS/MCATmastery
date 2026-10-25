@@ -17,10 +17,6 @@ interface Detail {
   progress: Progress;
 }
 
-const STAGES: { key: keyof Progress["tasks"]; label: string }[] = [
-  { key: "plan", label: "Topic plans" }, { key: "expand", label: "Topic splits" }, { key: "lesson", label: "Lessons" },
-];
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export default function RunPage() {
@@ -92,8 +88,8 @@ export default function RunPage() {
     const d = await res.json();
     if (!res.ok) { setNotice(d.error ?? "Could not update lessons"); return; }
     setNotice(
-      action === "start" ? `Lessons switched on: ${d.queued} topic(s) queued. Topics split later are added automatically.`
-        : action === "pause" ? "Lessons paused. Planning and splitting are unaffected."
+      action === "start" ? `Lessons switched on: ${d.queued} topic(s) queued.`
+        : action === "pause" ? "Lessons paused."
           : action === "resume" ? "Lessons resumed."
             : action === "stop" ? `Lessons stopped: ${d.dropped ?? 0} queued lesson(s) dropped.`
               : `Approved ${d.approved ?? 0} lesson(s).`,
@@ -116,7 +112,8 @@ export default function RunPage() {
   const lt = progress.tasks.lesson;
   const lessonsPending = lt.queued + lt.running;
   const autoOn = run.autoLessons !== false;
-  const splitsDone = progress.tasks.expand.done > 0;
+  const lessonTotal = lt.queued + lt.running + lt.done + lt.failed;
+  const lessonPct = lessonTotal ? Math.round((lt.done / lessonTotal) * 100) : 0;
 
   return (
     <Shell>
@@ -145,19 +142,12 @@ export default function RunPage() {
       )}
       {running && <p className="text-sm mb-3" style={{ color: ACCENT }}>Running. Keep this page open. It is safe to pause.</p>}
 
-      <section className="grid gap-3 sm:grid-cols-3 mb-4">
-        {STAGES.map(({ key, label }) => {
-          const t = progress.tasks[key];
-          const total = t.queued + t.running + t.done + t.failed;
-          const pct = total ? Math.round((t.done / total) * 100) : 0;
-          return (
-            <div key={key} className="p-3" style={card}>
-              <div className="flex justify-between text-xs" style={{ color: "var(--text-muted)" }}><span>{label}</span><span>{t.done}/{total}</span></div>
-              <div className="h-1.5 rounded-full mt-2" style={{ background: "var(--bg-input)" }}><div className="h-1.5 rounded-full" style={{ width: `${pct}%`, background: ACCENT }} /></div>
-              {t.failed > 0 && <p className="text-xs mt-1" style={{ color: "var(--accent-red)" }}>{t.failed} failed</p>}
-            </div>
-          );
-        })}
+      <section className="mb-4">
+        <div className="p-3" style={card}>
+          <div className="flex justify-between text-xs" style={{ color: "var(--text-muted)" }}><span>Lessons</span><span>{lt.done}/{lessonTotal}</span></div>
+          <div className="h-1.5 rounded-full mt-2" style={{ background: "var(--bg-input)" }}><div className="h-1.5 rounded-full" style={{ width: `${lessonPct}%`, background: ACCENT }} /></div>
+          {lt.failed > 0 && <p className="text-xs mt-1" style={{ color: "var(--accent-red)" }}>{lt.failed} failed</p>}
+        </div>
       </section>
 
       <section className="p-3 mb-4 flex flex-wrap items-center gap-2" style={card} aria-label="Lessons toolbar">
@@ -167,7 +157,7 @@ export default function RunPage() {
           {lessonsPending > 0 ? ` · ${lessonsPending} left` : ""}{run.lessonsPaused ? " · paused" : ""}{!autoOn ? " · automatic lessons off" : ""}
         </span>
         <span className="flex-1" />
-        {splitsDone && (!autoOn || (lessonsPending === 0 && !run.lessonsPaused)) && <button style={btn("primary")} onClick={() => lessonAction("start")}>Develop lessons</button>}
+        {topics.length > 0 && (!autoOn || (lessonsPending === 0 && !run.lessonsPaused)) && <button style={btn("primary")} onClick={() => lessonAction("start")}>Develop lessons</button>}
         {!run.lessonsPaused && lessonsPending > 0 && <button style={btn("ghost")} onClick={() => lessonAction("pause")}>Pause lessons</button>}
         {run.lessonsPaused && <button style={btn("primary")} onClick={() => lessonAction("resume")}>Resume lessons</button>}
         {lt.queued > 0 && <button style={btn("danger")} onClick={() => lessonAction("stop")}>Stop</button>}
@@ -195,7 +185,6 @@ export default function RunPage() {
         {run.sections.filter((s) => s.selected).map((s) => (
           <section key={s.id}>
             <h2 className="text-lg mb-1" style={{ color: "var(--text-primary)" }}>{s.id} · {s.title}</h2>
-            {!s.planned && <p className="text-sm" style={{ color: "var(--text-muted)" }}>Not planned yet.</p>}
             {s.coverageSummary && <p className="text-xs mb-2" style={{ color: "var(--text-muted)" }}>{s.coverageSummary}</p>}
             {s.declaredGaps && s.declaredGaps.length > 0 && (
               <p className="text-xs mb-2" style={{ color: "#d97706" }}>Gaps declared by the planner: {s.declaredGaps.map((g) => g.description).join("; ")}</p>

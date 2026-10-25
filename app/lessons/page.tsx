@@ -24,7 +24,12 @@ export default function LessonsHome() {
 
   const text = useMemo(() => (preset === "" ? "" : presetText(SUBCODEX_PRESETS[Number(preset)])), [preset]);
   const parsed = useMemo(() => (text ? parseSubCodex(text) : null), [text]);
-  const selected = parsed?.ok ? (picked ?? new Set(parsed.sections.map((s) => s.number))) : new Set<number>();
+  // Lessons are written from the shared topic database: only sections saved there (Codex → Topics only → Save) can be built.
+  const { data: bankData } = useSWR<{ sections: { number: number }[] }>(parsed?.ok ? `/api/codex/topic-bank?subject=${encodeURIComponent(parsed.subject ?? "")}` : null, fetcher);
+  const savedNumbers = useMemo(() => new Set((bankData?.sections ?? []).map((s) => s.number)), [bankData]);
+  const available = parsed?.ok ? parsed.sections.filter((s) => savedNumbers.has(s.number)) : [];
+  const availableNumbers = new Set(available.map((s) => s.number));
+  const selected = parsed?.ok ? new Set((picked ? [...picked] : available.map((s) => s.number)).filter((n) => availableNumbers.has(n))) : new Set<number>();
 
   async function start() {
     setBusy(true); setError("");
@@ -56,7 +61,7 @@ export default function LessonsHome() {
           <div>
             <h1 className="text-xl" style={{ color: "var(--text-primary)" }}>Develop MCAT lessons</h1>
             <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
-              Choose a subject. Each major section is planned, split into single teachable ideas, and written up as a reading lesson. No questions are generated.
+              Choose a subject and the major sections to write. Each topic from the shared topic database (planned and split once, in Codex) gets a reading lesson. No questions are generated.
             </p>
           </div>
           <select
@@ -70,10 +75,15 @@ export default function LessonsHome() {
           {parsed?.ok && (
             <div className="space-y-3">
               <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                {parsed.subject}: {parsed.sections.length} major section{parsed.sections.length === 1 ? "" : "s"}
+                {parsed.subject}: {available.length} of {parsed.sections.length} major section{parsed.sections.length === 1 ? "" : "s"} ready
               </p>
+              {bankData && available.length === 0 && (
+                <p className="text-sm" style={{ color: "var(--accent-red)" }}>
+                  No sections of {parsed.subject} are in the topic database yet. In Codex, run Topics only and save it to the database first.
+                </p>
+              )}
               <div className="grid gap-1.5 sm:grid-cols-2">
-                {parsed.sections.map((s) => (
+                {available.map((s) => (
                   <label key={s.number} className="flex items-center gap-2 text-sm" style={{ color: "var(--text-secondary)" }}>
                     <input
                       type="checkbox" checked={selected.has(s.number)}
@@ -88,17 +98,17 @@ export default function LessonsHome() {
                 ))}
               </div>
               <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-                Tip: build one major section first to check quality and cost before building the rest.
+                Sections not listed are not saved in the topic database yet. Tip: build one major section first to check quality and cost before building the rest.
               </p>
             </div>
           )}
 
           <label className="flex items-center gap-2 text-sm" style={{ color: "var(--text-secondary)" }}>
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
-            Write lessons automatically once topics are split
+            Write lessons automatically for every topic
           </label>
           <p className="text-xs -mt-2" style={{ color: "var(--text-muted)" }}>
-            Untick to stop after the topic splits, then develop all lessons or choose individual topics from the run page.
+            Untick to create the run without writing anything, then develop all lessons or choose individual topics from the run page.
           </p>
 
           <div className="flex items-end gap-3">
