@@ -2,8 +2,8 @@
 // touch Mastery's question bank or the Codex collections. Firebase is initialised by Mastery's own
 // FIREBASE_SERVICE_ACCOUNT variable.
 
-import type { LessonAiReview, LessonPart, LessonReview, LessonStage, LessonTask, LessonTopic, LessonsRun, RunSection } from "./types";
-import { docId, isLessonStage } from "./types";
+import type { LessonAiReview, LessonPart, LessonReading, LessonReview, LessonStage, LessonTask, LessonTopic, LessonsRun, RunSection } from "./types";
+import { docId, isLessonStage, readingId } from "./types";
 
 export interface LessonsStore {
   createRun(run: LessonsRun): Promise<void>;
@@ -34,6 +34,11 @@ export interface LessonsStore {
   listAiReviews(runId: string): Promise<LessonAiReview[]>;
   setAiReview(r: LessonAiReview): Promise<void>;
   deleteAiReview(runId: string, subsectionId: string): Promise<void>;
+
+  /** Study: a learner's reading progress. */
+  listReading(userId: string): Promise<LessonReading[]>;
+  getReading(userId: string, runId: string, subsectionId: string): Promise<LessonReading | null>;
+  putReading(r: LessonReading): Promise<void>;
 }
 
 // Write every part first, then check lessons: a correction queued by a check is rewritten before the next check runs.
@@ -53,7 +58,7 @@ export function pickClaimable(tasks: LessonTask[], now: Date, skipStages: Lesson
 
 // ── Firestore ───────────────────────────────────────────────────────────────
 
-const C = { runs: "lessons_runs", tasks: "lessons_tasks", topics: "lessons_topics", parts: "lessons_parts", reviews: "lessons_reviews", aiReviews: "lessons_aireviews" } as const;
+const C = { runs: "lessons_runs", tasks: "lessons_tasks", topics: "lessons_topics", parts: "lessons_parts", reviews: "lessons_reviews", aiReviews: "lessons_aireviews", reading: "lessons_reading" } as const;
 
 /** Firestore rejects `undefined` field values; this strips them from nested data. */
 function clean<T>(v: T): T {
@@ -93,7 +98,7 @@ export function createFirestoreStore(): LessonsStore {
       });
     },
     async deleteRun(id) {
-      for (const name of [C.tasks, C.topics, C.parts, C.reviews, C.aiReviews]) {
+      for (const name of [C.tasks, C.topics, C.parts, C.reviews, C.aiReviews, C.reading]) {
         const snap = await col(name).where("runId", "==", id).get();
         for (let i = 0; i < snap.docs.length; i += 400) {
           const batch = fsdb().batch();
@@ -163,6 +168,9 @@ export function createFirestoreStore(): LessonsStore {
     async listAiReviews(runId) { return byRun<LessonAiReview>(C.aiReviews, runId); },
     async setAiReview(r) { await col(C.aiReviews).doc(r.id).set(clean(r)); },
     async deleteAiReview(runId, subsectionId) { await col(C.aiReviews).doc(docId(runId, subsectionId)).delete(); },
+    async listReading(userId) { return (await col(C.reading).where("userId", "==", userId).get()).docs.map((d) => d.data() as LessonReading); },
+    async getReading(userId, runId, subsectionId) { const d = await col(C.reading).doc(readingId(userId, runId, subsectionId)).get(); return d.exists ? (d.data() as LessonReading) : null; },
+    async putReading(r) { await col(C.reading).doc(r.id).set(clean(r)); },
   };
 }
 
