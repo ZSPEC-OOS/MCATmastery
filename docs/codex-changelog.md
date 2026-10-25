@@ -5,6 +5,13 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: pick individual lessons when creating a Lessons run
+- On the Lessons new-run page, unticking **Write every lesson automatically** now lists each chosen section's
+  subsections (one lesson each) with checkboxes, Select all and Clear. Only the ticked lessons are queued when the
+  run is created; the rest can be developed, or more picked, from the run page. Ticking none creates an empty run.
+- The topic-database list route now includes each section's subsections.
+- **Untested:** written without installed dependencies, so no type-check or run.
+
 ### Change: Database page sections expand
 - Each section row that has saved topics expands (click the row, or Expand all) to show its saved contents: the
   planner's coverage summary and declared gaps, then every subsection (lesson) with its approval status and each split
