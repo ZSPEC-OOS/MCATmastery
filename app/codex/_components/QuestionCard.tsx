@@ -28,6 +28,7 @@ export default function QuestionCard({ q, onDecide }: { q: CodexQuestion; onDeci
         <span className="text-xs font-mono mt-0.5" style={{ color: "var(--text-muted)", minWidth: 96 }}>{q.qid}</span>
         <span className="flex-1 text-sm" style={{ color: "var(--text-primary)" }}>{c.stem.length > 160 && !open ? `${c.stem.slice(0, 160)}…` : c.stem}</span>
         <Badge status={q.status} />
+        {q.status === "approved" && q.approvedBy === "ai" && <span className="text-xs whitespace-nowrap" style={{ color: "var(--text-muted)" }}>by AI</span>}
         {q.revision > 1 && <span className="text-xs" style={{ color: "var(--text-muted)" }}>r{q.revision}</span>}
       </button>
 

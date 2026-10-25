@@ -6,7 +6,7 @@ export type CodexDepth = "topics" | "parents" | "parentsChecked" | "atomics" | "
 export const DEPTH_LABELS: Record<CodexDepth, string> = {
   topics:   "Topics only (builds the topic database)",
   parents:  "Through parent questions",
-  parentsChecked: "Parent questions only, with AI check",
+  parentsChecked: "Parent questions only, AI-checked and approved automatically",
   atomics:  "Through atomic questions",
   verified: "Complete, with AI verification",
 };
@@ -20,7 +20,7 @@ const CODEX_STAGES: readonly string[] = ["plan", "expand", "parent", "atomic", "
 export const isCodexStage = (s: string): s is CodexStage => CODEX_STAGES.includes(s);
 export type TaskStatus = "queued" | "running" | "done" | "failed";
 
-/** Question lifecycle. Only a person can move a question to "approved". */
+/** Question lifecycle. A person approves, except in "parentsChecked" runs where the AI check approves what it passes. */
 export type QuestionStatus =
   | "draft"        // written, not yet verified (or verification not requested)
   | "auto_passed"  // structural checks and AI review found no blocking problem — still needs a person
@@ -168,6 +168,8 @@ export interface CodexQuestion {
   model?: string;
   createdAt: string;
   decidedAt?: string;
+  /** Who approved it: a person, or the AI check (only for "parentsChecked" runs, which approve what the AI passes). */
+  approvedBy?: "ai" | "person";
 }
 
 /** One approved question as stored in the Codex database, copied out of its run. */
