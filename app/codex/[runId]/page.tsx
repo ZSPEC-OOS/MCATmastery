@@ -165,6 +165,8 @@ export default function RunPage() {
   const lessonOf = (tid: string) => content.find((c) => c.topicId === tid);
   const lessonTasks = progress.tasks.content;
   const lessonsPending = lessonTasks.queued + lessonTasks.running;
+  // Lessons can exist without the whole-run switch (topics chosen by hand), so show them whenever any are queued or written.
+  const lessonsShown = lessonsOn || lessonTasks.queued + lessonTasks.running + lessonTasks.done + lessonTasks.failed > 0 || content.length > 0;
   const lessonCounts = { written: content.length, approved: content.filter((c) => c.status === "approved").length, draft: content.filter((c) => c.status === "draft").length };
   const banked = run.banked;
   const current = (qid: string) => questions.find((q) => q.qid === qid && q.current);
@@ -209,7 +211,7 @@ export default function RunPage() {
       {running && <p className="text-sm mb-3" style={{ color: TEAL }}>Running — keep this page open. It is safe to pause.</p>}
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 mb-4">
-        {STAGES.filter(({ key }) => (key === "content" ? lessonsOn : contentRun ? key === "plan" || key === "expand" : true)).map(({ key, label }) => {
+        {STAGES.filter(({ key }) => (key === "content" ? lessonsShown : contentRun ? key === "plan" || key === "expand" : true)).map(({ key, label }) => {
           const t = progress.tasks[key];
           const total = t.queued + t.running + t.done + t.failed;
           const pct = total ? Math.round((t.done / total) * 100) : 0;
@@ -223,11 +225,11 @@ export default function RunPage() {
         })}
       </section>
 
-      {(progress.tasks.expand.done > 0 || lessonsOn) && (
+      {(progress.tasks.expand.done > 0 || lessonsShown) && (
         <section className="p-3 mb-4 flex flex-wrap items-center gap-2" style={card} aria-label="Lessons toolbar">
           <span className="text-sm font-semibold mr-1" style={{ color: "var(--text-primary)" }}>Lessons</span>
           <span className="text-xs mr-2" style={{ color: "var(--text-muted)" }}>
-            {lessonsOn
+            {lessonsShown
               ? `${lessonCounts.written} written · ${lessonsPending} left${run.contentPaused ? " · paused" : ""}`
               : "Optional reading lessons for each split topic"}
           </span>
@@ -235,9 +237,9 @@ export default function RunPage() {
           {!banked && (!lessonsOn || (lessonsPending === 0 && !run.contentPaused)) && (
             <button style={btn("primary")} onClick={startLessons}>Develop content</button>
           )}
-          {!banked && lessonsOn && !run.contentPaused && lessonsPending > 0 && <button style={btn("ghost")} onClick={() => lessonControl("pause")}>Pause lessons</button>}
-          {!banked && lessonsOn && run.contentPaused && <button style={btn("primary")} onClick={() => lessonControl("resume")}>Resume lessons</button>}
-          {!banked && lessonsOn && lessonTasks.queued > 0 && <button style={btn("danger")} onClick={() => lessonControl("stop")}>Stop</button>}
+          {!banked && !run.contentPaused && lessonsPending > 0 && <button style={btn("ghost")} onClick={() => lessonControl("pause")}>Pause lessons</button>}
+          {!banked && run.contentPaused && <button style={btn("primary")} onClick={() => lessonControl("resume")}>Resume lessons</button>}
+          {!banked && lessonTasks.queued > 0 && <button style={btn("danger")} onClick={() => lessonControl("stop")}>Stop</button>}
           <Link href={`/codex/${runId}/lessons`} style={{ ...btn("ghost"), textDecoration: "none" }}>Choose lessons</Link>
           <Link href={`/codex/${runId}/content`} style={{ ...btn("ghost"), textDecoration: "none" }}>View content</Link>
         </section>
@@ -261,13 +263,13 @@ export default function RunPage() {
             <b>{counts.approved}</b> approved · <b>{counts.auto_passed}</b> awaiting you · <b>{counts.flagged}</b> flagged · <b>{counts.rejected}</b> rejected
           </span>
         )}
-        {lessonsOn && (
+        {lessonsShown && (
           <span className="text-sm mr-2" style={{ color: "var(--text-secondary)" }}>
             Lessons: <b>{lessonCounts.written}</b> written · <b>{lessonCounts.approved}</b> approved · <b>{lessonCounts.draft}</b> awaiting you
           </span>
         )}
         <span className="flex-1" />
-        {lessonsOn && <button style={btn("ghost", lessonCounts.draft === 0 || !!banked)} disabled={lessonCounts.draft === 0 || !!banked} onClick={approveLessons}>Approve all lessons</button>}
+        {lessonsShown && <button style={btn("ghost", lessonCounts.draft === 0 || !!banked)} disabled={lessonCounts.draft === 0 || !!banked} onClick={approveLessons}>Approve all lessons</button>}
         {!contentRun && <button style={btn("ghost", counts.auto_passed === 0 || !!banked)} disabled={counts.auto_passed === 0 || !!banked} onClick={approvePassed}>Approve all that passed AI review</button>}
         <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/codex/runs/${runId}/export?approved=1`}>Download approved</a>
         <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/codex/runs/${runId}/export`}>Download everything</a>
@@ -304,8 +306,8 @@ export default function RunPage() {
                           <span className="text-xs font-mono" style={{ color: "var(--text-muted)", minWidth: 96 }}>{t.id}</span>
                           <span className="flex-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{t.groupTitle && <span className="block text-xs font-normal" style={{ color: "var(--text-muted)" }}>{t.groupTitle}</span>}{t.title}</span>
                           <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-                            {lessonOf(t.id) ? `lesson ${lessonOf(t.id)!.status}` : lessonsOn ? "no lesson yet" : ""}
-                            {!contentRun && `${lessonsOn ? " · " : ""}${parent ? `1 parent · ${atoms.length} atomic` : "no question yet"}`}
+                            {lessonOf(t.id) ? `lesson ${lessonOf(t.id)!.status}` : lessonsShown ? "no lesson yet" : ""}
+                            {!contentRun && `${lessonsShown ? " · " : ""}${parent ? `1 parent · ${atoms.length} atomic` : "no question yet"}`}
                           </span>
                         </button>
                         {open && (

@@ -17,6 +17,8 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
   confirmation. Only topics whose split has finished are queued. It sends you back to the run and starts it.
 - **View content** (`/codex/<run>/content`): lessons only, no questions, grouped by section and subsection, with a
   filter (all, awaiting, approved, rejected), open/collapse all, per-lesson Approve/Reject and Approve all.
+- **Fix:** the **Lessons** progress bar (lessons done of total) now shows whenever any lesson is queued or written,
+  including when topics were chosen by hand. It was hidden unless lessons had been switched on for the whole run.
 - **Untested:** written without installed dependencies, so no type-check or run.
 
 ### Change: reading lessons ("Topics only + content")
