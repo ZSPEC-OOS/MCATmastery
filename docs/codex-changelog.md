@@ -5,6 +5,13 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Fix: Lessons status wording and phone layout
+- **Ready message:** it said "N lessons chosen (all parts)" even when every part was written and only the AI check was
+  waiting. It now says how many parts are still to write, or "Every part is written; N lessons are waiting for the AI
+  check. Press Start."
+- **Lesson rows on phones:** the status and parts count sit under the title instead of beside it, so long titles no longer
+  wrap into a narrow column next to the Add to run / Rewrite button.
+
 ### Change: Stop button removed from the Lessons run page
 - The control bar is now just **Start / Resume** and **Pause**. Pause holds all work after the step in flight and keeps
   everything queued, so nothing is dropped. The Stop action is removed from the page, the API and the engine. A run with

@@ -134,7 +134,9 @@ export default function RunPage() {
   const statusText: Record<string, string> = {
     running: "Running. Keep this page open; it is safe to pause.",
     paused: `Paused. ${waiting} step${waiting === 1 ? "" : "s"} waiting. Press Resume to continue.`,
-    ready: `Ready. ${L.inRun} lesson${L.inRun === 1 ? "" : "s"} chosen (${L.partsTotal} parts). Nothing runs until you press Start.`,
+    ready: L.partsDone >= L.partsTotal
+      ? `Ready. Every part is written; ${L.checking} lesson${L.checking === 1 ? " is" : "s are"} waiting for the AI check. Press Start to run ${L.checking === 1 ? "it" : "them"}.`
+      : `Ready. ${L.inRun} lesson${L.inRun === 1 ? "" : "s"} chosen, ${L.partsTotal - L.partsDone} of ${L.partsTotal} parts still to write. Nothing runs until you press Start.`,
     stopped: `${unfinished} lesson${unfinished === 1 ? " is" : "s are"} not finished. Press Resume to continue ${unfinished === 1 ? "it" : "them"}.`,
     empty: "No lessons chosen yet. Open a lesson below and choose Add to run.",
     finished: "Finished. Everything chosen has been written and checked.",
