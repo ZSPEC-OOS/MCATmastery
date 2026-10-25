@@ -18,7 +18,7 @@ const LABEL: Record<string, { text: string; color: string }> = {
 };
 
 /** One lesson = one subsection (MS-1-SS-2), shown as organized parts, one per split topic. */
-export default function LessonCard({ lesson, onDecide, defaultOpen = false }: { lesson: Lesson; onDecide: (l: Lesson, action: "approve" | "reject") => Promise<void>; defaultOpen?: boolean }) {
+export default function LessonCard({ lesson, onDecide, onQueue, defaultOpen = false }: { lesson: Lesson; onDecide: (l: Lesson, action: "approve" | "reject") => Promise<void>; onQueue?: (l: Lesson) => Promise<void>; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const [busy, setBusy] = useState(false);
   const written = lesson.parts.filter((p) => p.part).length;
@@ -26,6 +26,11 @@ export default function LessonCard({ lesson, onDecide, defaultOpen = false }: { 
   const chip = LABEL[!lesson.inRun && lesson.status === "not_started" ? "not_chosen" : lesson.status];
   const queued = lesson.status === "not_started" && lesson.pending > 0 ? { text: "Queued", color: "var(--text-muted)" } : null;
   const shown = queued ?? chip;
+
+  async function queue() {
+    setBusy(true);
+    try { await onQueue?.(lesson); } finally { setBusy(false); }
+  }
 
   async function act(action: "approve" | "reject") {
     setBusy(true);
@@ -44,6 +49,17 @@ export default function LessonCard({ lesson, onDecide, defaultOpen = false }: { 
       {open && (
         <div className="px-3 pb-3 space-y-4 text-sm" style={{ color: "var(--text-secondary)" }}>
           {lesson.scope && <p className="italic">{lesson.scope}</p>}
+
+          {onQueue && lesson.pending === 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              {!lesson.inRun
+                ? <button style={btn("primary", busy)} disabled={busy} onClick={() => queue()}>Add to run</button>
+                : isComplete(lesson.status) && lesson.status !== "checking"
+                  ? <button style={btn("ghost", busy)} disabled={busy} onClick={() => { if (confirm("Write this lesson again? Its AI check and any decision are cleared.")) queue(); }}>Rewrite lesson</button>
+                  : null}
+              {!lesson.inRun && <span className="text-xs" style={{ color: "var(--text-muted)" }}>Queues every part. Nothing runs until you press Start.</span>}
+            </div>
+          )}
 
           {lesson.ai && (
             <div className="rounded-lg p-3 space-y-1.5" style={{ border: `1px solid ${lesson.ai.verdict === "pass" ? "rgba(22,163,74,0.4)" : "rgba(220,38,38,0.4)"}`, background: "var(--bg-card)" }}>

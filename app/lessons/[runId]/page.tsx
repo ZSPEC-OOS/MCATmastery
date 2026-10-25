@@ -26,6 +26,10 @@ export default function RunPage() {
   const [log, setLog] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [advanced, setAdvanced] = useState(false);
+  const [dlOpen, setDlOpen] = useState(false);
+  const [dlMode, setDlMode] = useState<"all" | "selected">("all");
+  const [dlApproved, setDlApproved] = useState(false);
+  const [dlPick, setDlPick] = useState<Set<string>>(new Set());
   const live = useRef(false);
   const lastMutate = useRef(0);
 
@@ -98,6 +102,20 @@ export default function RunPage() {
     mutate();
   }
 
+  async function queueOne(l: Lesson) {
+    const { ok, d } = await post("queue", { subsectionIds: [l.subsectionId] });
+    setNotice(ok ? `${d.queued} part(s) queued for ${l.subsectionId}. Press ${paused || phase === "stopped" ? "Resume" : "Start"} to write ${d.queued === 1 ? "it" : "them"}.` : (d.error ?? "Could not queue"));
+    await mutate();
+  }
+
+  function download() {
+    const q = new URLSearchParams();
+    if (dlApproved) q.set("approved", "1");
+    if (dlMode === "selected") q.set("lessons", [...dlPick].join(","));
+    window.location.href = `/api/lessons/runs/${runId}/export${q.toString() ? `?${q}` : ""}`;
+    setDlOpen(false);
+  }
+
   async function confirmAll() {
     const { ok, d } = await post("approve_all");
     setNotice(ok ? `Confirmed ${d.approved ?? 0} AI-approved lesson(s).` : (d.error ?? "Could not confirm"));
@@ -126,7 +144,7 @@ export default function RunPage() {
     paused: `Paused. ${waiting} step${waiting === 1 ? "" : "s"} waiting. Press Resume to continue.`,
     ready: `Ready. ${L.inRun} lesson${L.inRun === 1 ? "" : "s"} chosen (${L.partsTotal} parts). Nothing runs until you press Start.`,
     stopped: `Stopped. ${unfinished} lesson${unfinished === 1 ? " is" : "s are"} not finished. Press Start to continue ${unfinished === 1 ? "it" : "them"}.`,
-    empty: "No lessons chosen yet. Use Add lessons under Advanced to choose some.",
+    empty: "No lessons chosen yet. Open a lesson below and choose Add to run.",
     finished: "Finished. Everything chosen has been written and checked.",
   };
   const approvedCount = L.aiApproved + L.approved;
@@ -175,11 +193,32 @@ export default function RunPage() {
           </button>
           {(advanced || phase === "empty") && (
             <div className="flex flex-wrap items-center gap-2 mt-3">
-              <Link href={`/lessons/${runId}/choose`} style={{ ...btn("ghost"), textDecoration: "none" }}>Add lessons</Link>
-              <Link href={`/lessons/${runId}/read`} style={{ ...btn("ghost"), textDecoration: "none" }}>Read lessons</Link>
               <button style={btn("ghost", L.aiApproved === 0)} disabled={L.aiApproved === 0} onClick={confirmAll}>Confirm all AI-approved ({L.aiApproved})</button>
-              <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/lessons/runs/${runId}/export?approved=1`}>Download approved</a>
-              <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/lessons/runs/${runId}/export`}>Download all</a>
+              <button style={btn("ghost")} aria-expanded={dlOpen} onClick={() => setDlOpen((v) => !v)}>Download {dlOpen ? "▾" : "▸"}</button>
+              {dlOpen && (
+                <div className="basis-full p-3 space-y-2 text-sm" style={{ border: "1px solid var(--border)", borderRadius: 12, color: "var(--text-secondary)" }}>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <label className="flex items-center gap-2"><input type="radio" name="dl" checked={dlMode === "all"} onChange={() => setDlMode("all")} />All lessons</label>
+                    <label className="flex items-center gap-2"><input type="radio" name="dl" checked={dlMode === "selected"} onChange={() => setDlMode("selected")} />Selected lessons</label>
+                    <label className="flex items-center gap-2"><input type="checkbox" checked={dlApproved} onChange={(e) => setDlApproved(e.target.checked)} />Approved only</label>
+                  </div>
+                  {dlMode === "selected" && (
+                    <ul className="max-h-56 overflow-y-auto space-y-1">
+                      {lessons.filter((l) => l.status !== "not_started" && l.status !== "writing" && l.status !== "incomplete").map((l) => (
+                        <li key={l.subsectionId}>
+                          <label className="flex items-start gap-2">
+                            <input type="checkbox" className="mt-1" checked={dlPick.has(l.subsectionId)} onChange={(e) => setDlPick((p) => { const n = new Set(p); if (e.target.checked) n.add(l.subsectionId); else n.delete(l.subsectionId); return n; })} />
+                            <span><span className="font-mono text-xs mr-2" style={{ color: "var(--text-muted)" }}>{l.subsectionId}</span>{l.title}</span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <button style={btn("primary", dlMode === "selected" && dlPick.size === 0)} disabled={dlMode === "selected" && dlPick.size === 0} onClick={download}>
+                    Download{dlMode === "selected" ? ` (${dlPick.size})` : ""}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -208,7 +247,7 @@ export default function RunPage() {
               <p className="text-xs mb-2" style={{ color: "#d97706" }}>Gaps declared by the planner: {s.declaredGaps.map((g) => g.description).join("; ")}</p>
             )}
             <div className="space-y-1.5">
-              {lessons.filter((l) => l.sectionId === s.id).map((l) => <LessonCard key={l.subsectionId} lesson={l} onDecide={decide} />)}
+              {lessons.filter((l) => l.sectionId === s.id).map((l) => <LessonCard key={l.subsectionId} lesson={l} onDecide={decide} onQueue={queueOne} />)}
             </div>
           </section>
         ))}

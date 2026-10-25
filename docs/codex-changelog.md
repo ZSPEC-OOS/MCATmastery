@@ -5,6 +5,16 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: simpler Advanced section on the Lessons run page; one Download button
+- **Removed** the Add lessons and Read lessons buttons (and their pages). Reading now happens in **Study**.
+- **Advanced** now holds **Confirm all AI-approved** and a single **Download** button. Clicking Download opens a small
+  chooser: **All lessons** or **Selected lessons** (tick the lessons you want), plus an **Approved only** checkbox.
+  The export route accepts `?lessons=MS-1-SS-1,MS-1-SS-2` for the selected set.
+- **Adding and rewriting lessons moved into the lesson itself:** open a lesson below the controls to find **Add to run**
+  (for a lesson not in this run) or **Rewrite lesson** (clears its AI check and any decision). Both only queue; press
+  Start or Resume to write.
+- **Untested:** written without installed dependencies, so no type-check beyond syntax.
+
 ### Change: MCAT Lessons Study section and reader
 - **Build / Study tabs** in the Lessons navbar. **Study** (`/lessons/study`) is a library of every lesson that is
   approved (a person approved it, or the AI passed it and no one rejected it), grouped by subject and major section,
