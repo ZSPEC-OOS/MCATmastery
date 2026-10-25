@@ -16,6 +16,7 @@ interface Detail {
   questions: CodexQuestion[];
   failedTasks: { id: string; stage: string; targetId: string; error?: string }[];
   progress: Progress;
+  bankBlockers: string[];
 }
 
 const STAGES: { key: keyof Progress["tasks"]; label: string }[] = [
@@ -89,6 +90,23 @@ export default function RunPage() {
     mutate();
   }
 
+  async function saveToDatabase() {
+    if (!confirm("Save this run's approved questions to the database? The run will be locked and its sections will disappear from the new-run list until you remove it from the database.")) return;
+    setNotice("Saving to the database…");
+    const res = await fetch(`/api/codex/runs/${runId}/bank`, { method: "POST" });
+    const d = await res.json();
+    setNotice(res.ok ? `Saved ${d.questions} question(s) to the database. This run is now locked.` : (d.errors ?? [d.error]).join(" "));
+    mutate();
+  }
+
+  async function removeFromDatabase() {
+    if (!confirm("Remove this run's questions from the database? The run unlocks and its sections return to the new-run list.")) return;
+    const res = await fetch(`/api/codex/runs/${runId}/bank`, { method: "DELETE" });
+    const d = await res.json();
+    setNotice(res.ok ? `Removed ${d.removed} question(s) from the database. This run is unlocked.` : (d.error ?? "Could not remove"));
+    mutate();
+  }
+
   async function saveToFirebase(approved: boolean) {
     setNotice("Saving to Firebase Storage…");
     const res = await fetch(`/api/codex/runs/${runId}/export?save=1${approved ? "&approved=1" : ""}`);
@@ -99,11 +117,12 @@ export default function RunPage() {
   if (error) return <Shell><p style={{ color: "var(--accent-red)" }}>{error.message}</p></Shell>;
   if (!data) return <Shell><p style={{ color: "var(--text-muted)" }}>Loading…</p></Shell>;
 
-  const { run, topics, questions, progress, failedTasks } = data;
+  const { run, topics, questions, progress, failedTasks, bankBlockers } = data;
+  const banked = run.banked;
   const current = (qid: string) => questions.find((q) => q.qid === qid && q.current);
   const atomsOf = (id: string) => questions.filter((q) => q.parentId === id).sort((a, b) => a.qid.localeCompare(b.qid, undefined, { numeric: true }));
   const counts = progress.questions;
-  const unfinished = progress.active;
+  const unfinished = progress.active && !banked;
 
   return (
     <Shell>
@@ -124,6 +143,15 @@ export default function RunPage() {
             : <button style={btn("primary", !unfinished)} disabled={!unfinished} onClick={start}>{unfinished ? "Run" : "Finished"}</button>}
         </div>
       </div>
+
+      {banked && (
+        <div className="p-3 mb-4 text-sm flex flex-wrap items-center justify-between gap-2" style={{ ...card, borderColor: TEAL }}>
+          <span style={{ color: "var(--text-secondary)" }}>
+            <b style={{ color: TEAL }}>In the database</b> · {banked.questions} question(s) saved {new Date(banked.at).toLocaleString()}. This run is locked and its sections are hidden from the new-run list.
+          </span>
+          <button style={btn("ghost")} onClick={removeFromDatabase}>Remove from database</button>
+        </div>
+      )}
 
       {unfinished && !running && (
         <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>
@@ -151,7 +179,7 @@ export default function RunPage() {
         <div className="p-3 mb-4 text-sm" style={{ ...card, borderColor: "var(--accent-red)" }}>
           <div className="flex items-center justify-between gap-2">
             <b style={{ color: "var(--accent-red)" }}>{failedTasks.length} task(s) failed</b>
-            <button style={btn("ghost")} onClick={retry}>Retry failed</button>
+            <button style={btn("ghost", !!banked)} disabled={!!banked} onClick={retry}>Retry failed</button>
           </div>
           <ul className="mt-2 text-xs space-y-1" style={{ color: "var(--text-secondary)" }}>
             {failedTasks.slice(0, 5).map((t) => <li key={t.id}><code>{t.id}</code> — {t.error}</li>)}
@@ -164,10 +192,16 @@ export default function RunPage() {
           <b>{counts.approved}</b> approved · <b>{counts.auto_passed}</b> awaiting you · <b>{counts.flagged}</b> flagged · <b>{counts.rejected}</b> rejected
         </span>
         <span className="flex-1" />
-        <button style={btn("ghost", counts.auto_passed === 0)} disabled={counts.auto_passed === 0} onClick={approvePassed}>Approve all that passed AI review</button>
+        <button style={btn("ghost", counts.auto_passed === 0 || !!banked)} disabled={counts.auto_passed === 0 || !!banked} onClick={approvePassed}>Approve all that passed AI review</button>
         <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/codex/runs/${runId}/export?approved=1`}>Download approved</a>
         <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/codex/runs/${runId}/export`}>Download everything</a>
         <button style={btn("ghost", counts.approved === 0)} disabled={counts.approved === 0} onClick={() => saveToFirebase(true)}>Save approved to Firebase</button>
+        {!banked && <button style={btn("primary", bankBlockers.length > 0)} disabled={bankBlockers.length > 0} onClick={saveToDatabase}>Save to database</button>}
+        {!banked && bankBlockers.length > 0 && progress.topics > 0 && (
+          <ul className="basis-full text-xs list-disc pl-5" style={{ color: "var(--text-muted)" }}>
+            {bankBlockers.map((b) => <li key={b}>{b}</li>)}
+          </ul>
+        )}
       </section>
       {notice && <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>{notice}</p>}
 

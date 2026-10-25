@@ -15,6 +15,8 @@ export async function GET() {
       runs.map(async (r) => ({
         id: r.id, subject: r.subject, depth: r.depth, status: r.status, createdAt: r.createdAt,
         sections: r.sections.filter((s) => s.selected).length,
+        banked: r.banked ?? null,
+        bankedSections: r.banked ? r.sections.filter((s) => s.selected).map((s) => s.number) : [],
         progress: await getProgress(store, r.id),
       })),
     );

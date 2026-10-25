@@ -53,6 +53,12 @@ export interface RunSection {
   subsections: { id: string; title: string; scope: string }[];
 }
 
+/** Set when a finished run has been saved to the Codex database (the final bank). */
+export interface RunBanked {
+  at: string;
+  questions: number;
+}
+
 export interface CodexRun {
   id: string;
   subject: string;
@@ -62,6 +68,8 @@ export interface CodexRun {
   status: "active" | "cancelled";
   createdAt: string;
   createdBy: string;
+  /** While set, the run is locked and its sections are hidden from the new-run picker. */
+  banked?: RunBanked;
 }
 
 export interface CodexTopic {
@@ -154,6 +162,26 @@ export interface CodexQuestion {
   model?: string;
   createdAt: string;
   decidedAt?: string;
+}
+
+/** One approved question as stored in the Codex database, copied out of its run. */
+export interface BankQuestion {
+  id: string;               // `${runId}__${qid}` (document id)
+  runId: string;
+  subject: string;
+  sectionId: string;
+  sectionNumber: number;
+  sectionTitle: string;
+  subsectionId: string;
+  subsectionTitle: string;
+  topicId: string;
+  topicTitle: string;
+  qid: string;
+  kind: "parent" | "atomic";
+  parentId?: string;
+  revision: number;
+  content: QuestionContent;
+  savedAt: string;
 }
 
 export const docId = (runId: string, ...parts: (string | number)[]) => [runId, ...parts].join("__");
