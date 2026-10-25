@@ -74,6 +74,16 @@ export default function RunPage() {
 
   const pause = () => { live.current = false; };
 
+  // The lesson-selection page sends you here with ?autostart=1 after queuing topics.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (autoStarted.current || !data || typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("autostart") !== "1") return;
+    autoStarted.current = true;
+    window.history.replaceState({}, "", window.location.pathname);
+    if (data.progress.active) start();
+  }, [data, start]);
+
   async function decide(q: CodexQuestion, action: "approve" | "reject", override = false) {
     const res = await fetch(`/api/codex/runs/${runId}/questions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, questionId: q.id, override }) });
     if (!res.ok) setNotice((await res.json()).error ?? "Could not record the decision");
@@ -95,8 +105,18 @@ export default function RunPage() {
   async function startLessons() {
     const res = await fetch(`/api/codex/runs/${runId}/content`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start" }) });
     const d = await res.json();
-    setNotice(res.ok ? `Lessons switched on: ${d.queued} topic(s) queued. Press Run to develop them; topics split later are added automatically.` : (d.error ?? "Could not start lessons"));
-    mutate();
+    setNotice(res.ok ? `Lessons switched on: ${d.queued} topic(s) queued. Topics split later are added automatically.` : (d.error ?? "Could not start lessons"));
+    await mutate();
+    if (res.ok && d.queued > 0) start();
+  }
+
+  async function lessonControl(action: "pause" | "resume" | "stop") {
+    if (action === "stop" && !confirm("Stop lessons? Lessons not yet started are dropped and automatic lessons switch off. Lessons already written are kept.")) return;
+    const res = await fetch(`/api/codex/runs/${runId}/content`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
+    const d = await res.json();
+    setNotice(!res.ok ? (d.error ?? "Could not update lessons") : action === "pause" ? "Lessons paused. Other stages are unaffected." : action === "resume" ? "Lessons resumed." : `Lessons stopped: ${d.dropped ?? 0} queued lesson(s) dropped.`);
+    await mutate();
+    if (action === "resume") start();
   }
 
   async function decideLesson(c: CodexContent, action: "approve" | "reject") {
@@ -143,6 +163,8 @@ export default function RunPage() {
   const lessonsOn = contentOn(run);
   const contentRun = run.depth === "content";
   const lessonOf = (tid: string) => content.find((c) => c.topicId === tid);
+  const lessonTasks = progress.tasks.content;
+  const lessonsPending = lessonTasks.queued + lessonTasks.running;
   const lessonCounts = { written: content.length, approved: content.filter((c) => c.status === "approved").length, draft: content.filter((c) => c.status === "draft").length };
   const banked = run.banked;
   const current = (qid: string) => questions.find((q) => q.qid === qid && q.current);
@@ -196,16 +218,30 @@ export default function RunPage() {
               <div className="flex justify-between text-xs" style={{ color: "var(--text-muted)" }}><span>{label}</span><span>{t.done}/{total}</span></div>
               <div className="h-1.5 rounded-full mt-2" style={{ background: "var(--bg-input)" }}><div className="h-1.5 rounded-full" style={{ width: `${pct}%`, background: TEAL }} /></div>
               {t.failed > 0 && <p className="text-xs mt-1" style={{ color: "var(--accent-red)" }}>{t.failed} failed</p>}
-              {key === "expand" && !lessonsOn && !banked && t.done > 0 && (
-                <div className="mt-2">
-                  <button style={{ ...btn("ghost"), padding: "4px 10px", fontSize: 12 }} onClick={startLessons}>Develop content</button>
-                  <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Optional: write a reading lesson for each split topic.</p>
-                </div>
-              )}
             </div>
           );
         })}
       </section>
+
+      {(progress.tasks.expand.done > 0 || lessonsOn) && (
+        <section className="p-3 mb-4 flex flex-wrap items-center gap-2" style={card} aria-label="Lessons toolbar">
+          <span className="text-sm font-semibold mr-1" style={{ color: "var(--text-primary)" }}>Lessons</span>
+          <span className="text-xs mr-2" style={{ color: "var(--text-muted)" }}>
+            {lessonsOn
+              ? `${lessonCounts.written} written · ${lessonsPending} left${run.contentPaused ? " · paused" : ""}`
+              : "Optional reading lessons for each split topic"}
+          </span>
+          <span className="flex-1" />
+          {!banked && (!lessonsOn || (lessonsPending === 0 && !run.contentPaused)) && (
+            <button style={btn("primary")} onClick={startLessons}>Develop content</button>
+          )}
+          {!banked && lessonsOn && !run.contentPaused && lessonsPending > 0 && <button style={btn("ghost")} onClick={() => lessonControl("pause")}>Pause lessons</button>}
+          {!banked && lessonsOn && run.contentPaused && <button style={btn("primary")} onClick={() => lessonControl("resume")}>Resume lessons</button>}
+          {!banked && lessonsOn && lessonTasks.queued > 0 && <button style={btn("danger")} onClick={() => lessonControl("stop")}>Stop</button>}
+          <Link href={`/codex/${runId}/lessons`} style={{ ...btn("ghost"), textDecoration: "none" }}>Choose lessons</Link>
+          <Link href={`/codex/${runId}/content`} style={{ ...btn("ghost"), textDecoration: "none" }}>View content</Link>
+        </section>
+      )}
 
       {failedTasks.length > 0 && (
         <div className="p-3 mb-4 text-sm" style={{ ...card, borderColor: "var(--accent-red)" }}>
