@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { confirmAiApproved, controlRun, decideLesson, queueLessons, startRun } from "../../../../../../lib/lessons/engine";
+import { confirmAiApproved, pauseRun, decideLesson, queueLessons, startRun } from "../../../../../../lib/lessons/engine";
 import { errorResponse, getDeps, isDenied, requireLessonsUser } from "../../../../../../lib/lessons/runtime";
 
 // "start": release the hold and get every pending lesson ready (the page then runs it). "pause" holds all work.
-// "stop" drops everything still queued. "queue" (with subsectionIds) adds lessons to the run or rewrites ones already
+// "queue" (with subsectionIds) adds lessons to the run or rewrites ones already
 // there; it never starts anything. "approve" / "reject" (with subsectionId) are the optional human decisions, and
 // "approve_all" confirms every lesson the AI has already passed.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -24,8 +24,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const r = await queueLessons(store, id, now, subsectionIds);
       return NextResponse.json(r, { status: r.ok ? 200 : 409 });
     }
-    if (body.action === "pause" || body.action === "stop") {
-      const r = await controlRun(store, id, body.action);
+    if (body.action === "pause") {
+      const r = await pauseRun(store, id);
       return NextResponse.json(r, { status: r.ok ? 200 : 409 });
     }
     if (body.action === "approve_all") return NextResponse.json({ approved: await confirmAiApproved(store, id, now) });

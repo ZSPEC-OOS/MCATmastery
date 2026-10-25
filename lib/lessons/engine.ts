@@ -392,15 +392,12 @@ export async function startRun(store: LessonsStore, runId: string, now: Date): P
   return { ok: true, queued: missing.length + checks };
 }
 
-/** Pause holds all work (nothing is claimed until Start). Stop drops every queued task; written parts are kept and a step in flight finishes. */
-export async function controlRun(store: LessonsStore, runId: string, action: "pause" | "stop"): Promise<{ ok: true; dropped?: number } | { ok: false; error: string }> {
+/** Pause holds all work: nothing is claimed until Start/Resume. A step already in flight finishes; queued work is kept. */
+export async function pauseRun(store: LessonsStore, runId: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const run = await store.getRun(runId);
   if (!run) return { ok: false, error: "Run not found" };
-  if (action === "pause") { await store.updateRun(runId, { lessonsPaused: true }); return { ok: true }; }
-  const queued = (await store.listTasks(runId)).filter((t) => isLessonStage(t.stage) && t.status === "queued");
-  await store.deleteTasks(runId, queued.map((t) => t.id));
-  await store.updateRun(runId, { lessonsPaused: false });
-  return { ok: true, dropped: queued.length };
+  await store.updateRun(runId, { lessonsPaused: true });
+  return { ok: true };
 }
 
 // ── Human decision (optional) ───────────────────────────────────────────────

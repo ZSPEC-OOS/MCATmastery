@@ -88,14 +88,6 @@ export default function RunPage() {
     mutate();
   }
 
-  async function onStop() {
-    if (!confirm("Stop? Everything still queued is dropped. Parts already written are kept, and a step in progress finishes. You can add lessons again later.")) return;
-    live.current = false;
-    const { ok, d } = await post("stop");
-    setNotice(ok ? `Stopped. ${d.dropped ?? 0} queued step(s) dropped.` : (d.error ?? "Could not stop"));
-    mutate();
-  }
-
   async function decide(l: Lesson, action: "approve" | "reject") {
     const { ok, d } = await post(action, { subsectionId: l.subsectionId });
     if (!ok) setNotice(d.error ?? "Could not record the decision");
@@ -142,8 +134,10 @@ export default function RunPage() {
   const statusText: Record<string, string> = {
     running: "Running. Keep this page open; it is safe to pause.",
     paused: `Paused. ${waiting} step${waiting === 1 ? "" : "s"} waiting. Press Resume to continue.`,
-    ready: `Ready. ${L.inRun} lesson${L.inRun === 1 ? "" : "s"} chosen (${L.partsTotal} parts). Nothing runs until you press Start.`,
-    stopped: `Stopped. ${unfinished} lesson${unfinished === 1 ? " is" : "s are"} not finished. Press Start to continue ${unfinished === 1 ? "it" : "them"}.`,
+    ready: L.partsDone >= L.partsTotal
+      ? `Ready. Every part is written; ${L.checking} lesson${L.checking === 1 ? " is" : "s are"} waiting for the AI check. Press Start to run ${L.checking === 1 ? "it" : "them"}.`
+      : `Ready. ${L.inRun} lesson${L.inRun === 1 ? "" : "s"} chosen, ${L.partsTotal - L.partsDone} of ${L.partsTotal} parts still to write. Nothing runs until you press Start.`,
+    stopped: `${unfinished} lesson${unfinished === 1 ? " is" : "s are"} not finished. Press Resume to continue ${unfinished === 1 ? "it" : "them"}.`,
     empty: "No lessons chosen yet. Open a lesson below and choose Add to run.",
     finished: "Finished. Everything chosen has been written and checked.",
   };
@@ -164,7 +158,6 @@ export default function RunPage() {
             {paused || phase === "stopped" ? "Resume" : "Start"}
           </button>
           <button style={btn("ghost", !running)} disabled={!running} onClick={onPause}>Pause</button>
-          <button style={btn("danger", !(progress.active || paused))} disabled={!(progress.active || paused)} onClick={onStop}>Stop</button>
           <span className="flex-1" />
           <label className="text-xs" style={{ color: "var(--text-muted)" }}>Parallel
             <select value={concurrency} disabled={running} onChange={(e) => setConcurrency(Number(e.target.value))} style={{ ...input, width: 64, marginLeft: 6, padding: "6px 8px" }}>

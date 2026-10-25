@@ -47,10 +47,13 @@ export default function LessonCard({ lesson, onDecide, onQueue, defaultOpen = fa
     <div className="rounded-xl" style={{ border: "1px solid var(--border)", background: "var(--bg-elevated)" }}>
       <div className="flex items-start">
         <button className="flex-1 text-left p-3 flex items-start gap-2 min-w-0" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-          <span className="text-xs font-mono mt-0.5" style={{ color: "var(--text-muted)", minWidth: 84 }}>{lesson.subsectionId}</span>
-          <span className="flex-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{lesson.title}</span>
+          <span className="text-xs font-mono mt-0.5 shrink-0" style={{ color: "var(--text-muted)", minWidth: 68 }}>{lesson.subsectionId}</span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-sm font-medium" style={{ color: "var(--text-primary)" }}>{lesson.title}</span>
+            <span className="block sm:hidden text-xs font-semibold mt-0.5" style={{ color: shown.color }}>{shown.text} · {written}/{lesson.parts.length} parts</span>
+          </span>
           <span className="hidden sm:inline text-xs mt-0.5 whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{written}/{lesson.parts.length} parts</span>
-          <span className="text-xs mt-0.5 whitespace-nowrap font-semibold" style={{ color: shown.color }}>{shown.text}</span>
+          <span className="hidden sm:inline text-xs mt-0.5 whitespace-nowrap font-semibold" style={{ color: shown.color }}>{shown.text}</span>
         </button>
         {quick && (
           <button
