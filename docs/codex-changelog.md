@@ -5,6 +5,11 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: Lessons run page, secondary actions moved under Advanced
+- Add lessons, Read lessons, Confirm all AI-approved and the two downloads now sit in a collapsed **Advanced** section
+  of the control card, so the page shows just Start / Pause / Stop, one status line and one progress bar. Advanced
+  opens by itself when no lessons are chosen yet, so Add lessons is easy to find.
+
 ### Change: Lessons reorganized: one control bar, nothing auto-starts, AI validation layer
 - **No auto start.** Creating a run only queues the lessons you ticked (everything is ticked by default, with Select
   all / Clear). The "write automatically" checkbox is gone. Nothing is written until you press Start.
