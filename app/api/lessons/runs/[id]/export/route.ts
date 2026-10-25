@@ -13,7 +13,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
     const approvedOnly = req.nextUrl.searchParams.get("approved") === "1";
     const now = new Date();
-    const doc = buildExport(run, await store.listTopics(id), await store.listLessons(id), { approvedOnly, now });
+    const doc = buildExport(run, await store.listTopics(id), await store.listParts(id), await store.listReviews(id), { approvedOnly, now });
     const name = `${run.subject.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-lessons-${approvedOnly ? "approved" : "all"}-${now.toISOString().slice(0, 19).replace(/\D/g, "")}.json`;
     return new NextResponse(JSON.stringify(doc, null, 2), { headers: { "Content-Type": "application/json", "Content-Disposition": `attachment; filename="${name}"` } });
   } catch (e) {

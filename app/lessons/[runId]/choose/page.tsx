@@ -5,11 +5,11 @@ import { useParams, useRouter } from "next/navigation";
 import useSWR from "swr";
 import LessonsNavbar from "../../_components/LessonsNavbar";
 import { ACCENT, btn, card, fetcher } from "../../_components/ui";
-import type { LessonDoc, LessonTopic, LessonsRun } from "../../../../lib/lessons/types";
+import type { Lesson, LessonsRun } from "../../../../lib/lessons/types";
 
-interface Detail { run: Omit<LessonsRun, "sourceText">; topics: LessonTopic[]; lessons: LessonDoc[] }
+interface Detail { run: Omit<LessonsRun, "sourceText">; lessons: Lesson[] }
 
-// Choose individual topics to develop lessons for.
+// Choose individual lessons (subsections) to develop. Every part of a chosen lesson is written again.
 export default function ChooseLessons() {
   const { runId } = useParams<{ runId: string }>();
   const router = useRouter();
@@ -21,29 +21,29 @@ export default function ChooseLessons() {
   if (error) return <Shell runId={runId}><p style={{ color: "var(--accent-red)" }}>{error.message}</p></Shell>;
   if (!data) return <Shell runId={runId}><p style={{ color: "var(--text-muted)" }}>Loading…</p></Shell>;
 
-  const { run, topics, lessons } = data;
-  const lessonOf = (tid: string) => lessons.find((l) => l.topicId === tid);
+  const { run, lessons } = data;
+  const written = (l: Lesson) => l.parts.filter((p) => p.part).length;
   const toggle = (ids: string[], on: boolean) => setPicked((p) => { const n = new Set(p); ids.forEach((i) => (on ? n.add(i) : n.delete(i))); return n; });
-  const rewrite = [...picked].filter((id) => lessonOf(id)).length;
+  const rewrite = lessons.filter((l) => picked.has(l.subsectionId) && written(l) > 0).length;
 
   async function develop() {
-    if (rewrite > 0 && !confirm(`${rewrite} selected topic(s) already have a lesson. It will be replaced by a new draft. Continue?`)) return;
+    if (rewrite > 0 && !confirm(`${rewrite} selected lesson(s) already have written parts. They will be written again and the lesson returns to awaiting review. Continue?`)) return;
     setBusy(true); setNotice("");
-    const res = await fetch(`/api/lessons/runs/${runId}/lessons`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start", topicIds: [...picked] }) });
+    const res = await fetch(`/api/lessons/runs/${runId}/lessons`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start", subsectionIds: [...picked] }) });
     const d = await res.json();
     if (!res.ok) { setNotice(d.error ?? "Could not start"); setBusy(false); return; }
-    if (d.queued === 0) { setNotice("Nothing was queued: the chosen topics already have a lesson in progress."); setBusy(false); return; }
+    if (d.queued === 0) { setNotice("Nothing was queued: the chosen lessons already have parts in progress."); setBusy(false); return; }
     router.push(`/lessons/${runId}?autostart=1`);
   }
 
   return (
     <Shell runId={runId}>
       <h1 className="text-2xl mb-1" style={{ color: "var(--text-primary)" }}>Choose lessons</h1>
-      <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>{run.subject}: tick the topics to write reading lessons for, then develop them.</p>
+      <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>{run.subject}: tick the lessons (subsections) to write, then develop them. Each lesson is written as one part per topic.</p>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <button style={btn("ghost")} onClick={() => toggle(topics.map((t) => t.id), true)}>Select all</button>
-        <button style={btn("ghost")} onClick={() => toggle(topics.filter((t) => !lessonOf(t.id)).map((t) => t.id), true)}>Select topics without a lesson</button>
+        <button style={btn("ghost")} onClick={() => toggle(lessons.map((l) => l.subsectionId), true)}>Select all</button>
+        <button style={btn("ghost")} onClick={() => toggle(lessons.filter((l) => written(l) === 0).map((l) => l.subsectionId), true)}>Select lessons not started</button>
         <button style={btn("ghost")} onClick={() => setPicked(new Set())}>Clear</button>
         <span className="flex-1" />
         <button style={btn("primary", busy || picked.size === 0)} disabled={busy || picked.size === 0} onClick={develop}>
@@ -53,41 +53,32 @@ export default function ChooseLessons() {
       {notice && <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>{notice}</p>}
 
       <div className="space-y-5">
-        {run.sections.filter((s) => s.selected).map((s) => (
-          <section key={s.id}>
-            <h2 className="text-lg mb-1" style={{ color: "var(--text-primary)" }}>{s.id} · {s.title}</h2>
-            {s.subsections.map((ss) => {
-              const rows = topics.filter((t) => t.subsectionId === ss.id);
-              const ids = rows.map((t) => t.id);
-              const all = ids.length > 0 && ids.every((i) => picked.has(i));
-              return (
-                <div key={ss.id} className="mb-3" style={card}>
-                  <label className="flex items-center gap-2 p-3 text-sm font-semibold" style={{ color: "var(--text-secondary)" }}>
-                    <input type="checkbox" checked={all} onChange={(e) => toggle(ids, e.target.checked)} />
-                    {ss.id} · {ss.title}
-                  </label>
-                  <ul className="px-3 pb-2">
-                    {rows.map((t) => {
-                      const l = lessonOf(t.id);
-                      return (
-                        <li key={t.id}>
-                          <label className="flex items-start gap-2 py-1.5 text-sm" style={{ color: "var(--text-primary)" }}>
-                            <input type="checkbox" className="mt-1" checked={picked.has(t.id)} onChange={(e) => toggle([t.id], e.target.checked)} />
-                            <span className="flex-1">
-                              {t.groupTitle && <span className="block text-xs" style={{ color: "var(--text-muted)" }}>{t.groupTitle}</span>}
-                              {t.title}
-                            </span>
-                            <span className="text-xs" style={{ color: l ? ACCENT : "var(--text-muted)" }}>{l ? `lesson ${l.status}` : "no lesson"}</span>
-                          </label>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              );
-            })}
-          </section>
-        ))}
+        {run.sections.filter((s) => s.selected).map((s) => {
+          const mine = lessons.filter((l) => l.sectionId === s.id);
+          const ids = mine.map((l) => l.subsectionId);
+          const all = ids.length > 0 && ids.every((i) => picked.has(i));
+          return (
+            <section key={s.id}>
+              <label className="flex items-center gap-2 text-lg mb-1" style={{ color: "var(--text-primary)" }}>
+                <input type="checkbox" checked={all} onChange={(e) => toggle(ids, e.target.checked)} />
+                {s.id} · {s.title}
+              </label>
+              <div className="mb-3" style={card}>
+                <ul className="px-3 py-2">
+                  {mine.map((l) => (
+                    <li key={l.subsectionId}>
+                      <label className="flex items-start gap-2 py-1.5 text-sm" style={{ color: "var(--text-primary)" }}>
+                        <input type="checkbox" className="mt-1" checked={picked.has(l.subsectionId)} onChange={(e) => toggle([l.subsectionId], e.target.checked)} />
+                        <span className="flex-1"><span className="font-mono text-xs mr-2" style={{ color: "var(--text-muted)" }}>{l.subsectionId}</span>{l.title}</span>
+                        <span className="text-xs whitespace-nowrap" style={{ color: written(l) > 0 ? ACCENT : "var(--text-muted)" }}>{written(l)}/{l.parts.length} parts · {l.status === "writing" ? "not complete" : l.status}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </section>
+          );
+        })}
       </div>
     </Shell>
   );

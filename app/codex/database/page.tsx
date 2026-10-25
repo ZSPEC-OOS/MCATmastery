@@ -6,7 +6,7 @@ import { TEAL, card, fetcher, input } from "../_components/ui";
 
 interface Row {
   number: number; id: string; title: string; topics: number; topicsSaved: boolean; questionsSaved: boolean;
-  lessonsWritten: number; lessonsApproved: number; complete: boolean;
+  lessonsTotal: number; lessonsApproved: number; complete: boolean;
 }
 interface Data { subject: string; sections: Row[]; subjects: string[] }
 
@@ -28,7 +28,7 @@ export default function DatabasePage() {
       <main className="max-w-4xl mx-auto w-full px-4 md:px-6 py-6 flex-1">
         <h1 className="text-2xl mb-1" style={{ color: "var(--text-primary)" }}>Database</h1>
         <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
-          A section is complete when its topics are saved, its questions are saved to the question database, and every lesson is approved.
+          A section is complete when its topics are saved, its questions are saved to the question database, and every lesson (one per subsection) is approved.
         </p>
 
         <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -47,7 +47,7 @@ export default function DatabasePage() {
               <span className="text-sm flex-1 min-w-[200px]" style={{ color: "var(--text-primary)" }}><b>{s.id}</b> {s.title}</span>
               <Chip ok={s.topicsSaved}>{s.topicsSaved ? `${s.topics} topics saved` : "topics not saved"}</Chip>
               <Chip ok={s.questionsSaved}>{s.questionsSaved ? "questions saved" : "no questions saved"}</Chip>
-              <Chip ok={s.topicsSaved && s.lessonsApproved >= s.topics}>{s.topicsSaved ? `lessons ${s.lessonsApproved}/${s.topics} approved` : "no lessons"}</Chip>
+              <Chip ok={s.topicsSaved && s.lessonsTotal > 0 && s.lessonsApproved >= s.lessonsTotal}>{s.topicsSaved ? `lessons ${s.lessonsApproved}/${s.lessonsTotal} approved` : "no lessons"}</Chip>
               {s.complete && <span className="text-xs font-semibold" style={{ color: TEAL }}>Complete</span>}
             </div>
           ))}

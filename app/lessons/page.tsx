@@ -10,7 +10,7 @@ import { SUBCODEX_PRESETS, presetText } from "../../lib/codex/presets";
 
 interface RunRow {
   id: string; subject: string; status: string; createdAt: string; sections: number;
-  progress: { active: boolean; failed: number; topics: number; lessons: { written: number; draft: number; approved: number; rejected: number } };
+  progress: { active: boolean; failed: number; topics: number; lessons: { total: number; written: number; draft: number; approved: number; rejected: number; parts: number } };
 }
 
 export default function LessonsHome() {
@@ -61,7 +61,7 @@ export default function LessonsHome() {
           <div>
             <h1 className="text-xl" style={{ color: "var(--text-primary)" }}>Develop MCAT lessons</h1>
             <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
-              Choose a subject and the major sections to write. Each topic from the shared topic database (planned and split once, in Codex) gets a reading lesson. No questions are generated.
+              Choose a subject and the major sections to write. Each subsection (MS-1-SS-1 and so on) becomes one reading lesson that holds every split topic from the shared topic database (planned and split once, in Codex) as an organized part. No questions are generated.
             </p>
           </div>
           <select
@@ -108,7 +108,7 @@ export default function LessonsHome() {
             Write lessons automatically for every topic
           </label>
           <p className="text-xs -mt-2" style={{ color: "var(--text-muted)" }}>
-            Untick to create the run without writing anything, then develop all lessons or choose individual topics from the run page.
+            Untick to create the run without writing anything, then develop all lessons or choose individual lessons from the run page.
           </p>
 
           <div className="flex items-end gap-3">
@@ -134,7 +134,7 @@ export default function LessonsHome() {
               </p>
               <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 items-center text-xs" style={{ color: "var(--text-secondary)" }}>
                 <span>{r.progress.topics} topics</span>
-                <span>{r.progress.lessons.written} lessons · {r.progress.lessons.approved} approved · {r.progress.lessons.draft} awaiting you</span>
+                <span>{r.progress.lessons.written}/{r.progress.lessons.total} lessons · {r.progress.lessons.approved} approved · {r.progress.lessons.draft} awaiting you</span>
                 {r.progress.failed > 0 && <span style={{ color: "var(--accent-red)" }}>{r.progress.failed} task(s) failed</span>}
                 {r.progress.active && <span style={{ color: "#d97706" }}>unfinished</span>}
               </div>

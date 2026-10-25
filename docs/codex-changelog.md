@@ -5,6 +5,22 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: Lessons are one per subsection, with every split topic as a part
+- **Unit of a lesson:** a subsection (MS-1-SS-2), titled "MS-1-SS-2 · <subsection title>". Its split topics are the
+  lesson's organized parts, in curriculum order. MS-1 gives 7 lessons instead of 122 separate ones.
+- **How it is written:** one AI call per part (so a long subsection never hits the output limit), each told its place
+  ("part 3 of 16") and the lesson it belongs to. The lesson is assembled from its parts when read; the subsection's
+  planned scope is its introduction and the parts form its contents list. Parts are stored one document each
+  (`lessons_parts`), so parallel workers cannot overwrite each other.
+- **Review is per lesson:** Approve or Reject the whole lesson once every part is written (`lessons_reviews`).
+  Rewriting any part returns that lesson to awaiting review.
+- **Choose lessons** now picks subsections; every part of a chosen lesson is written again. Run page, Read page and
+  the export (schema 2.0.0) are organized by lesson with parts inside.
+- **Database page:** lessons are counted as subsections approved out of subsections saved (for example 3/7).
+- **Earlier trial lessons:** per-topic lessons written before this change (`lessons_items`) are no longer read.
+- **Not built:** an AI-written overview and wrap-up per lesson; for now the subsection scope is the introduction.
+- **Untested:** written without installed dependencies, so no type-check or run.
+
 ### Change: Database checklist and select-all for the first Topics-only run
 - **Database page** (Codex navbar, also linked from Lessons): pick a subject and see every major section with three
   checks: topics saved to the topic database, questions saved to the question database, lessons approved out of
