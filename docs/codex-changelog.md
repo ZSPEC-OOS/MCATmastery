@@ -5,6 +5,26 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: shared topic database; Codex and Lessons now build from it
+- **Save topics to database (Codex, Topics-only runs):** when a Topics-only run has finished planning and every
+  split (no active or failed tasks), **Save topics to database** writes each selected major section and its split
+  topics to a new shared collection pair, `topicbank_sections` and `topicbank_topics`, keyed by subject. The save
+  is **permanent**: a saved section is never overwritten, there is no remove button, and the app has no code that
+  deletes it. The run is locked and shows a banner. (Fixing a mistake would need a manual edit in Firestore.)
+- **Codex run rules now follow the database:**
+  - *Topics only* is offered only for sections **not** yet saved, so a saved section can never be planned or split
+    again. The new-run depth defaults to Topics only.
+  - *Every other depth* (parent, atomic, verified) is offered only for sections **already saved**. The run copies
+    those topics and goes straight to parent questions; it has no plan or split stages, and those cards are hidden.
+- **Lessons now build from the same database:** a Lessons run copies a saved section's topics and writes one
+  lesson per topic. Lessons no longer plans or splits anything itself (that code is removed), and a section that is
+  not saved cannot be built there. The page says to run Topics only in Codex first.
+- **Existing runs:** unaffected. Older Codex runs that planned and split in the same run keep working. Lessons runs
+  made before this change may show no lessons (their old plan/split tasks are ignored).
+- **Untested:** written without installed dependencies, so no type-check or run. First job: run Topics only for one
+  Biology section in Codex, save it, then build questions and lessons from it.
+- **Not built:** a section completion checklist across Codex and Lessons.
+
 ### Repair: Codex runs stopped loading after lessons were removed
 - **Symptom:** the Codex runs list and older runs would not load.
 - **Cause:** runs on which lessons had been developed still held tasks with the stage `content`. After lessons

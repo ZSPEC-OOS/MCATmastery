@@ -3,7 +3,7 @@
 // FIREBASE_SERVICE_ACCOUNT variable.
 
 import type { LessonDoc, LessonStage, LessonTask, LessonTopic, LessonsRun, RunSection } from "./types";
-import { docId } from "./types";
+import { docId, isLessonStage } from "./types";
 
 export interface LessonsStore {
   createRun(run: LessonsRun): Promise<void>;
@@ -22,7 +22,6 @@ export interface LessonsStore {
   claimNextTask(runId: string, now: Date, leaseMs: number, skipStages?: LessonStage[]): Promise<LessonTask | null>;
 
   putTopics(topics: LessonTopic[]): Promise<void>;
-  /** Working topics only: a topic that was split into finer ones is not listed (getTopic still returns it). */
   listTopics(runId: string): Promise<LessonTopic[]>;
   getTopic(runId: string, id: string): Promise<LessonTopic | null>;
   updateTopic(runId: string, id: string, patch: Partial<LessonTopic>): Promise<void>;
@@ -32,19 +31,16 @@ export interface LessonsStore {
   updateLesson(runId: string, topicId: string, patch: Partial<LessonDoc>): Promise<void>;
 }
 
-// Plan first, then split, then lessons: each phase finishes for the whole run before the next begins.
-const STAGE_RANK: Record<LessonStage, number> = { plan: 0, expand: 1, lesson: 2 };
-
 export function pickClaimable(tasks: LessonTask[], now: Date, skipStages: LessonStage[] = []): LessonTask[] {
   const t = now.getTime();
   return tasks
     .filter((x) => {
-      if (skipStages.includes(x.stage)) return false;
+      if (!isLessonStage(x.stage) || skipStages.includes(x.stage)) return false;
       if (x.status === "queued") return !x.notBefore || new Date(x.notBefore).getTime() <= t;
       if (x.status === "running") return !!x.leaseUntil && new Date(x.leaseUntil).getTime() < t;
       return false;
     })
-    .sort((a, b) => STAGE_RANK[a.stage] - STAGE_RANK[b.stage] || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id, undefined, { numeric: true }));
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id, undefined, { numeric: true }));
 }
 
 // ── Firestore ───────────────────────────────────────────────────────────────
@@ -147,7 +143,7 @@ export function createFirestoreStore(): LessonsStore {
         await batch.commit();
       }
     },
-    async listTopics(runId) { return (await byRun<LessonTopic>(C.topics, runId)).filter((t) => !t.expanded); },
+    async listTopics(runId) { return byRun<LessonTopic>(C.topics, runId); },
     async getTopic(runId, id) { const d = await col(C.topics).doc(docId(runId, id)).get(); return d.exists ? (d.data() as LessonTopic) : null; },
     async updateTopic(runId, id, patch) { await col(C.topics).doc(docId(runId, id)).update(clean(patch)); },
 

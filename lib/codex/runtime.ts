@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getStore } from "./store";
+import { getTopicBank } from "../topicbank";
 import { createModelCaller } from "./model";
 import type { Deps } from "./engine";
 
@@ -16,7 +17,7 @@ export async function requireCodexUser(): Promise<{ id: string } | NextResponse>
 export const isDenied = (v: { id: string } | NextResponse): v is NextResponse => v instanceof NextResponse;
 
 export function getDeps(): Deps {
-  return { store: getStore(), model: createModelCaller() };
+  return { store: getStore(), bank: getTopicBank(), model: createModelCaller() };
 }
 
 export function errorResponse(e: unknown, status = 500) {

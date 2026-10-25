@@ -1,25 +1,26 @@
 // MCAT Lessons pipeline engine.
 //
-//   Sub-Codex → topic plan (per major section) → topic splits (single teachable ideas) → one reading lesson
-//   per topic → human review. Lessons only: no questions are ever written.
+//   Topic database (planned and split once, in Codex) → one reading lesson per topic → human review.
+//   Lessons only: no questions are ever written, and nothing here plans or splits a section.
 //
 // There is no background worker: every unit of work is a persisted task, and `advance()` runs exactly one task
 // per call. The Lessons page calls it in a loop while a run is active; closing the page just pauses the run.
-// Everything is idempotent per task id. Plan and split validation, the model caller and the Sub-Codex parser are
+// Everything is idempotent per task id. The Sub-Codex parser, the topic database and the model caller are
 // borrowed from Codex; everything that writes lessons lives here.
 
 import type { LessonsStore } from "./store";
 import { parseSubCodex } from "../codex/subcodex";
-import { checkExpansion, checkPlan } from "../codex/checks";
 import { UnparseableOutput } from "../codex/engine";
 import type { ModelCaller } from "../codex/engine";
+import type { TopicBank } from "../topicbank";
 import { checkLesson } from "./checks";
-import { renderExpandPrompt, renderLessonPrompt, renderPlanPrompt } from "./prompts";
-import { MAX_REPAIR_ROUNDS, MAX_TASK_ATTEMPTS, autoLessonsOn, docId, isCarsSubject, splitTopicId, subsectionId, topicId } from "./types";
+import { renderLessonPrompt } from "./prompts";
+import { MAX_REPAIR_ROUNDS, MAX_TASK_ATTEMPTS, autoLessonsOn, docId, isCarsSubject, isLessonStage } from "./types";
 import type { Finding, LessonDoc, LessonStage, LessonTask, LessonTopic, LessonsRun } from "./types";
 
 export interface Deps {
   store: LessonsStore;
+  bank: TopicBank;
   model: ModelCaller;
   now?: () => Date;
 }
@@ -37,18 +38,26 @@ const nowOf = (deps: Deps) => (deps.now ? deps.now() : new Date());
 
 export interface CreateRunInput {
   sourceText: string;
-  /** Major-section numbers to build now; empty or omitted = all. */
+  /** Major-section numbers to build now; empty or omitted = every saved section. */
   sectionNumbers?: number[];
-  /** Write lessons automatically once topics are split (default true). */
+  /** Write lessons automatically for every topic (default true). */
   autoLessons?: boolean;
   createdBy: string;
 }
 
+/** A lessons run copies its sections and topics out of the topic database; only sections saved there can be built. */
 export async function createRun(deps: Deps, input: CreateRunInput): Promise<{ ok: true; run: LessonsRun } | { ok: false; errors: ReturnType<typeof parseSubCodex>["errors"] }> {
   const parsed = parseSubCodex(input.sourceText);
   if (!parsed.ok || !parsed.subject) return { ok: false, errors: parsed.errors };
+  const fail = (code: string, message: string) => ({ ok: false as const, errors: [{ line: null, code, message }] });
 
-  const wanted = new Set(input.sectionNumbers?.length ? input.sectionNumbers : parsed.sections.map((s) => s.number));
+  const saved = new Map((await deps.bank.listSections(parsed.subject)).map((s) => [s.number, s]));
+  const requested = input.sectionNumbers?.length ? input.sectionNumbers : [...saved.keys()];
+  const missing = requested.filter((n) => !saved.has(n));
+  if (missing.length > 0) return fail("NOT_SAVED", `MS-${missing.join(", MS-")} ${missing.length === 1 ? "is" : "are"} not in the topic database yet. In Codex, run Topics only for it and save it to the database first.`);
+  if (requested.length === 0) return fail("NO_SELECTION", "No sections of this subject are saved in the topic database yet. In Codex, run Topics only and save it first.");
+
+  const wanted = new Set(requested);
   const now = iso(nowOf(deps));
   const id = `run_${now.replace(/\D/g, "").slice(0, 14)}_${Math.random().toString(36).slice(2, 7)}`;
   const run: LessonsRun = {
@@ -59,17 +68,27 @@ export async function createRun(deps: Deps, input: CreateRunInput): Promise<{ ok
     createdAt: now,
     createdBy: input.createdBy,
     autoLessons: input.autoLessons !== false,
-    sections: parsed.sections.map((s) => ({ number: s.number, id: s.id, title: s.title, selected: wanted.has(s.number), planned: false, subsections: [] })),
+    sections: parsed.sections.map((s) => {
+      const b = saved.get(s.number);
+      return b && wanted.has(s.number)
+        ? { number: s.number, id: s.id, title: s.title, selected: true, planned: true, coverageSummary: b.coverageSummary, declaredGaps: b.declaredGaps, subsections: b.subsections }
+        : { number: s.number, id: s.id, title: s.title, selected: false, planned: false, subsections: [] };
+    }),
   };
-  if (!run.sections.some((s) => s.selected)) return { ok: false, errors: [{ line: null, code: "NO_SELECTION", message: "Select at least one major section." }] };
+
+  const topics: LessonTopic[] = (await deps.bank.listTopics(parsed.subject, [...wanted])).map((t) => ({
+    id: t.topicId, runId: run.id, sectionId: t.sectionId, subsectionId: t.subsectionId, subsectionTitle: t.subsectionTitle, number: t.number,
+    title: t.title, scope: t.scope, primaryLearningTarget: t.primaryLearningTarget, ...(t.groupTitle ? { groupTitle: t.groupTitle } : {}),
+  }));
 
   await deps.store.createRun(run);
-  await deps.store.putTasks(run.sections.filter((s) => s.selected).map((s) => newTask(run.id, "plan", s.id, now)));
+  await deps.store.putTopics(topics);
+  if (autoLessonsOn(run)) await deps.store.putTasks(topics.map((t) => newTask(run.id, t.id, now)));
   return { ok: true, run };
 }
 
-function newTask(runId: string, stage: LessonStage, targetId: string, now: string): LessonTask {
-  return { id: `${stage}__${targetId}`, runId, stage, targetId, status: "queued", attempts: 0, createdAt: now, updatedAt: now };
+function newTask(runId: string, targetId: string, now: string): LessonTask {
+  return { id: `lesson__${targetId}`, runId, stage: "lesson", targetId, status: "queued", attempts: 0, createdAt: now, updatedAt: now };
 }
 
 // ── Progress ────────────────────────────────────────────────────────────────
@@ -83,10 +102,10 @@ export interface Progress {
 }
 
 export async function getProgress(store: LessonsStore, runId: string): Promise<Progress> {
-  const [tasks, topics, lessons, run] = await Promise.all([store.listTasks(runId), store.listTopics(runId), store.listLessons(runId), store.getRun(runId)]);
-  const held = (t: LessonTask) => run?.lessonsPaused === true && t.stage === "lesson" && t.status === "queued"; // paused lessons are not work "to do now"
-  const empty = () => ({ queued: 0, running: 0, done: 0, failed: 0 });
-  const byStage: Progress["tasks"] = { plan: empty(), expand: empty(), lesson: empty() };
+  const [allTasks, topics, lessons, run] = await Promise.all([store.listTasks(runId), store.listTopics(runId), store.listLessons(runId), store.getRun(runId)]);
+  const tasks = allTasks.filter((t) => isLessonStage(t.stage));
+  const held = (t: LessonTask) => run?.lessonsPaused === true && t.status === "queued"; // paused lessons are not work "to do now"
+  const byStage: Progress["tasks"] = { lesson: { queued: 0, running: 0, done: 0, failed: 0 } };
   for (const t of tasks) byStage[t.stage][t.status]++;
   return {
     tasks: byStage,
@@ -103,7 +122,7 @@ export async function getProgress(store: LessonsStore, runId: string): Promise<P
 }
 
 export async function retryFailed(store: LessonsStore, runId: string, now: Date): Promise<number> {
-  const failed = (await store.listTasks(runId)).filter((t) => t.status === "failed");
+  const failed = (await store.listTasks(runId)).filter((t) => t.status === "failed" && isLessonStage(t.stage));
   for (const t of failed) await store.updateTask(runId, t.id, { status: "queued", attempts: 0, error: undefined, notBefore: undefined, leaseUntil: undefined, updatedAt: iso(now) });
   return failed.length;
 }
@@ -126,11 +145,7 @@ export async function advance(deps: Deps, runId: string): Promise<AdvanceResult>
   if (!task) return { ran: null, progress: await getProgress(store, runId) };
 
   try {
-    switch (task.stage) {
-      case "plan":   await runPlan(deps, run, task); break;
-      case "expand": await runExpand(deps, run, task); break;
-      case "lesson": await runLesson(deps, run, task); break;
-    }
+    await runLesson(deps, run, task);
     await store.updateTask(runId, task.id, { status: "done", error: undefined, leaseUntil: undefined, updatedAt: iso(nowOf(deps)) });
     return { ran: { id: task.id, stage: task.stage, targetId: task.targetId, outcome: "done" }, progress: await getProgress(store, runId) };
   } catch (e) {
@@ -181,90 +196,10 @@ async function generateValidated<T>(
   throw new ContentFailure(`Validation still failing after ${MAX_REPAIR_ROUNDS} repair rounds: ${last.slice(0, 3).map((f) => f.message).join(" | ")}`, last);
 }
 
-// ── Stage 1: topic planning ─────────────────────────────────────────────────
-
-async function runPlan(deps: Deps, run: LessonsRun, task: LessonTask) {
-  const section = run.sections.find((s) => s.id === task.targetId);
-  if (!section) throw new ContentFailure(`Unknown major section ${task.targetId}`, []);
-
-  const { value: plan } = await generateValidated(deps, {
-    maxTokens: 16000,
-    render: (repair) =>
-      renderPlanPrompt({
-        cars: isCarsSubject(run.subject),
-        subject: run.subject,
-        section: { id: section.id, title: section.title },
-        outline: run.sections.map((s) => ({ id: s.id, title: s.title })),
-        ...(repair ? { repair } : {}),
-      }),
-    validate: (json) => checkPlan(json),
-  });
-
-  // IDs are assigned by code, never by the model. Topic numbers continue across subsections.
-  let n = 0;
-  const topics: LessonTopic[] = [];
-  const subsections = plan.subsections.map((s, i) => ({ id: subsectionId(section.number, i + 1), title: s.title, scope: s.scope }));
-  plan.subsections.forEach((s, i) => {
-    for (const t of s.topics) {
-      n++;
-      topics.push({
-        id: topicId(section.number, i + 1, n), runId: run.id, sectionId: section.id,
-        subsectionId: subsections[i].id, subsectionTitle: s.title, number: n,
-        title: t.title, scope: t.scope, primaryLearningTarget: t.primaryLearningTarget,
-      });
-    }
-  });
-
-  await deps.store.putTopics(topics);
-  await deps.store.updateSection(run.id, section.number, { planned: true, coverageSummary: plan.coverageSummary, declaredGaps: plan.declaredGaps, subsections });
-  // Each planned topic is then split into as many single-idea topics as it needs (possibly just itself).
-  const now = iso(nowOf(deps));
-  await deps.store.putTasks(topics.map((t) => newTask(run.id, "expand", t.id, now)));
-}
-
-// ── Stage 2: topic splits ───────────────────────────────────────────────────
-
-async function runExpand(deps: Deps, run: LessonsRun, task: LessonTask) {
-  const topic = await deps.store.getTopic(run.id, task.targetId);
-  if (!topic) throw new ContentFailure(`Unknown topic ${task.targetId}`, []);
-  const section = run.sections.find((s) => s.id === topic.sectionId)!;
-  const siblingTitles = (await deps.store.listTopics(run.id)).filter((t) => t.subsectionId === topic.subsectionId && t.id !== topic.id).map((t) => t.title);
-
-  const { value } = await generateValidated(deps, {
-    maxTokens: 6000,
-    render: (repair) =>
-      renderExpandPrompt({
-        cars: isCarsSubject(run.subject),
-        subject: run.subject,
-        topic: { id: topic.id, title: topic.title, majorSection: section.title, subsection: topic.subsectionTitle, scope: topic.scope, primaryLearningTarget: topic.primaryLearningTarget },
-        siblingTitles,
-        ...(repair ? { repair } : {}),
-      }),
-    validate: (json) => checkExpansion(json, siblingTitles),
-  });
-
-  const now = iso(nowOf(deps));
-  let lessonTopics: string[] = [topic.id];
-  if (value.targets.length > 1) {
-    // The broad topic is replaced by finer ones, each with one lesson. Numbers sort them in place.
-    const children: LessonTopic[] = value.targets.map((t, i) => ({
-      id: splitTopicId(topic.id, i + 1), runId: run.id, sectionId: topic.sectionId,
-      subsectionId: topic.subsectionId, subsectionTitle: topic.subsectionTitle, number: topic.number + (i + 1) / 1000,
-      title: t.title, scope: t.scope, primaryLearningTarget: t.primaryLearningTarget, groupTitle: topic.title,
-    }));
-    await deps.store.putTopics(children);
-    await deps.store.updateTopic(run.id, topic.id, { expanded: true });
-    lessonTopics = children.map((c) => c.id);
-  }
-  // Re-read the run: the user may have pressed Stop (or Develop lessons) while this split was in flight.
-  const fresh = (await deps.store.getRun(run.id)) ?? run;
-  if (autoLessonsOn(fresh)) await deps.store.putTasks(lessonTopics.map((id) => newTask(run.id, "lesson", id, now)));
-}
-
-// ── Stage 3: reading lessons ────────────────────────────────────────────────
+// ── Reading lessons ─────────────────────────────────────────────────────────
 
 async function runLesson(deps: Deps, run: LessonsRun, task: LessonTask) {
-  const topic = await deps.store.getTopic(run.id, task.targetId);
+  const topic = (await deps.store.listTopics(run.id)).find((t) => t.id === task.targetId);
   if (!topic) throw new ContentFailure(`Unknown topic ${task.targetId}`, []);
   const section = run.sections.find((s) => s.id === topic.sectionId)!;
   const siblingTitles = (await deps.store.listTopics(run.id)).filter((t) => t.subsectionId === topic.subsectionId && t.id !== topic.id).map((t) => t.title);
@@ -291,9 +226,8 @@ async function runLesson(deps: Deps, run: LessonsRun, task: LessonTask) {
 // ── Lesson controls ─────────────────────────────────────────────────────────
 
 /**
- * Without topicIds: switch automatic lessons on and queue one for every topic whose split has finished and that has
- * none yet (topics split later follow automatically). With topicIds: queue just those, rewriting any that already
- * have a lesson, and leave the automatic setting alone.
+ * Without topicIds: switch automatic lessons on and queue one for every topic that has no lesson task yet.
+ * With topicIds: queue just those, rewriting any that already have a lesson, and leave the automatic setting alone.
  */
 export async function startLessons(
   store: LessonsStore, runId: string, now: Date, topicIds?: string[],
@@ -301,32 +235,28 @@ export async function startLessons(
   const run = await store.getRun(runId);
   if (!run) return { ok: false, error: "Run not found" };
   const [topics, tasks] = await Promise.all([store.listTopics(runId), store.listTasks(runId)]);
-  const splitDone = new Set(tasks.filter((t) => t.stage === "expand" && t.status === "done").map((t) => t.targetId));
-  const lessonTasks = new Map(tasks.filter((t) => t.stage === "lesson").map((t) => [t.targetId, t]));
-  // A split-off topic (MS-1-SS-1-1.2) belongs to the broad topic it came from (MS-1-SS-1-1).
-  const origin = (t: LessonTopic) => (t.groupTitle ? t.id.replace(/\.\d+$/, "") : t.id);
-  const split = topics.filter((t) => splitDone.has(origin(t)));
+  const lessonTasks = new Map(tasks.filter((t) => isLessonStage(t.stage)).map((t) => [t.targetId, t]));
 
   let ready: LessonTopic[];
   if (topicIds) {
     const want = new Set(topicIds);
-    ready = split.filter((t) => want.has(t.id) && !["queued", "running"].includes(lessonTasks.get(t.id)?.status ?? ""));
+    ready = topics.filter((t) => want.has(t.id) && !["queued", "running"].includes(lessonTasks.get(t.id)?.status ?? ""));
   } else {
     await store.updateRun(runId, { autoLessons: true });
-    ready = split.filter((t) => !lessonTasks.has(t.id));
+    ready = topics.filter((t) => !lessonTasks.has(t.id));
   }
   await store.updateRun(runId, { lessonsPaused: false });
-  await store.putTasks(ready.map((t) => newTask(runId, "lesson", t.id, iso(now))));
+  await store.putTasks(ready.map((t) => newTask(runId, t.id, iso(now))));
   return { ok: true, queued: ready.length };
 }
 
-/** Pause holds lessons only (planning and splitting carry on); resume releases them; stop drops every lesson not yet started and turns automatic lessons off. */
+/** Pause holds lessons; resume releases them; stop drops every lesson not yet started and turns automatic lessons off. */
 export async function controlLessons(store: LessonsStore, runId: string, action: "pause" | "resume" | "stop"): Promise<{ ok: true; dropped?: number } | { ok: false; error: string }> {
   const run = await store.getRun(runId);
   if (!run) return { ok: false, error: "Run not found" };
   if (action === "pause") { await store.updateRun(runId, { lessonsPaused: true }); return { ok: true }; }
   if (action === "resume") { await store.updateRun(runId, { lessonsPaused: false }); return { ok: true }; }
-  const queued = (await store.listTasks(runId)).filter((t) => t.stage === "lesson" && t.status === "queued");
+  const queued = (await store.listTasks(runId)).filter((t) => isLessonStage(t.stage) && t.status === "queued");
   await store.deleteTasks(runId, queued.map((t) => t.id));
   await store.updateRun(runId, { autoLessons: false, lessonsPaused: false });
   return { ok: true, dropped: queued.length };

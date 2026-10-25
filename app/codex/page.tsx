@@ -13,6 +13,7 @@ import type { CodexDepth } from "../../lib/codex/types";
 interface RunRow {
   id: string; subject: string; depth: CodexDepth; status: string; createdAt: string; sections: number;
   banked: { at: string; questions: number } | null; bankedSections: number[];
+  topicsSaved: { at: string; topics: number } | null;
   progress: { active: boolean; failed: number; topics: number; questions: Record<string, number> };
 }
 
@@ -20,21 +21,26 @@ export default function CodexHome() {
   const router = useRouter();
   const { data, mutate } = useSWR<{ runs: RunRow[] }>("/api/codex/runs", fetcher);
   const [preset, setPreset] = useState("");   // index into SUBCODEX_PRESETS; "" = nothing chosen
-  const [depth, setDepth] = useState<CodexDepth>("verified");
+  const [depth, setDepth] = useState<CodexDepth>("topics");
   const [picked, setPicked] = useState<Set<number> | null>(null); // null = all sections
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const text = useMemo(() => (preset === "" ? "" : presetText(SUBCODEX_PRESETS[Number(preset)])), [preset]);
   const parsed = useMemo(() => (text ? parseSubCodex(text) : null), [text]);
-  // Sections already saved to the database are not offered; Remove from database (on the run) brings them back.
+  // The shared topic database decides what can be built. Topics only: sections not saved yet (saving is permanent).
+  // Every other depth: sections whose topics are saved. Sections whose questions are in the question database are hidden.
+  const { data: bankData } = useSWR<{ sections: { number: number }[] }>(parsed?.ok ? `/api/codex/topic-bank?subject=${encodeURIComponent(parsed.subject ?? "")}` : null, fetcher);
+  const savedTopics = useMemo(() => new Set((bankData?.sections ?? []).map((s) => s.number)), [bankData]);
   const bankedNumbers = useMemo(() => {
     const out = new Set<number>();
     if (parsed?.ok) for (const r of data?.runs ?? []) if (r.banked && r.subject === parsed.subject) r.bankedSections.forEach((n) => out.add(n));
     return out;
   }, [data, parsed]);
-  const available = parsed?.ok ? parsed.sections.filter((s) => !bankedNumbers.has(s.number)) : [];
-  const selected = parsed?.ok ? new Set((picked ? [...picked] : available.map((s) => s.number)).filter((n) => !bankedNumbers.has(n))) : new Set<number>();
+  const topicsOnly = depth === "topics";
+  const available = parsed?.ok ? parsed.sections.filter((s) => (topicsOnly ? !savedTopics.has(s.number) : savedTopics.has(s.number) && !bankedNumbers.has(s.number))) : [];
+  const availableNumbers = new Set(available.map((s) => s.number));
+  const selected = parsed?.ok ? new Set((picked ? [...picked] : available.map((s) => s.number)).filter((n) => availableNumbers.has(n))) : new Set<number>();
 
   async function start() {
     setBusy(true); setError("");
@@ -76,11 +82,12 @@ export default function CodexHome() {
               <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
                 {parsed.subject} — {available.length} major section{available.length === 1 ? "" : "s"} available
               </p>
-              {bankedNumbers.size > 0 && (
-                <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-                  {bankedNumbers.size} section{bankedNumbers.size === 1 ? " is" : "s are"} saved in the database and hidden here. To bring one back, open its run and choose Remove from database.
-                </p>
-              )}
+              <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                {topicsOnly
+                  ? `${savedTopics.size} of ${parsed.sections.length} section${parsed.sections.length === 1 ? "" : "s"} already saved in the topic database (permanent, so they are not offered here). `
+                  : `Only sections saved in the topic database can be built into questions: ${savedTopics.size} of ${parsed.sections.length}. Run Topics only and save it to the database first for the rest. `}
+                {bankedNumbers.size > 0 && !topicsOnly && `${bankedNumbers.size} more are hidden because their questions are saved to the question database.`}
+              </p>
               <div className="grid gap-1.5 sm:grid-cols-2">
                 {available.map((s) => (
                   <label key={s.number} className="flex items-center gap-2 text-sm" style={{ color: "var(--text-secondary)" }}>
@@ -139,6 +146,7 @@ export default function CodexHome() {
                   <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
                     {q.approved} approved · {q.auto_passed} awaiting you · {q.flagged} flagged
                   </span>
+                  {r.topicsSaved && <span className="text-xs" style={{ color: TEAL }}>Topics in database ({r.topicsSaved.topics})</span>}
                   {r.progress.failed > 0 && <span className="text-xs" style={{ color: "var(--accent-red)" }}>{r.progress.failed} task(s) failed</span>}
                   {r.progress.active && <span className="text-xs" style={{ color: "#d97706" }}>unfinished</span>}
                 </div>

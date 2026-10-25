@@ -9,7 +9,7 @@ import type { LessonDoc, LessonTopic, LessonsRun } from "../../../../lib/lessons
 
 interface Detail { run: Omit<LessonsRun, "sourceText">; topics: LessonTopic[]; lessons: LessonDoc[] }
 
-// Choose individual topics to develop lessons for. Only topics whose split has finished are queued; the rest are skipped.
+// Choose individual topics to develop lessons for.
 export default function ChooseLessons() {
   const { runId } = useParams<{ runId: string }>();
   const router = useRouter();
@@ -32,14 +32,14 @@ export default function ChooseLessons() {
     const res = await fetch(`/api/lessons/runs/${runId}/lessons`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start", topicIds: [...picked] }) });
     const d = await res.json();
     if (!res.ok) { setNotice(d.error ?? "Could not start"); setBusy(false); return; }
-    if (d.queued === 0) { setNotice("Nothing was queued: the chosen topics are not split yet or already have a lesson in progress."); setBusy(false); return; }
+    if (d.queued === 0) { setNotice("Nothing was queued: the chosen topics already have a lesson in progress."); setBusy(false); return; }
     router.push(`/lessons/${runId}?autostart=1`);
   }
 
   return (
     <Shell runId={runId}>
       <h1 className="text-2xl mb-1" style={{ color: "var(--text-primary)" }}>Choose lessons</h1>
-      <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>{run.subject}: tick the topics to write reading lessons for, then develop them. Only topics whose split has finished are queued.</p>
+      <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>{run.subject}: tick the topics to write reading lessons for, then develop them.</p>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <button style={btn("ghost")} onClick={() => toggle(topics.map((t) => t.id), true)}>Select all</button>
