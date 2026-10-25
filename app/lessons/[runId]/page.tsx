@@ -11,7 +11,6 @@ import type { Progress } from "../../../lib/lessons/engine";
 
 interface Detail {
   run: Omit<LessonsRun, "sourceText">;
-  topics: LessonTopic[];
   lessons: Lesson[];
   failedTasks: { id: string; stage: string; targetId: string; error?: string }[];
   progress: Progress;
@@ -65,7 +64,7 @@ export default function RunPage() {
 
   const pause = () => { live.current = false; };
 
-  // The topic-chooser page sends you here with ?autostart=1 after queuing topics.
+  // The lesson-chooser page sends you here with ?autostart=1 after queuing lessons.
   const autoStarted = useRef(false);
   useEffect(() => {
     if (autoStarted.current || !data || typeof window === "undefined") return;
