@@ -169,6 +169,7 @@ export default function RunPage() {
   const written = { done: stage("parent").done + stage("atomic").done, total: stage("parent").total + stage("atomic").total };
   const checks = stage("verify");
   const savedTotal = Math.max(progress.saved, progress.topics - counts.rejected);
+  const hasCheck = run.depth === "parentsChecked" || run.depth === "verified";
   const unfinished = progress.active && !locked;
   const phase = locked ? "locked" : running ? "running" : unfinished ? (done > 0 ? "paused" : "ready") : total === 0 ? "empty" : "finished";
 
@@ -233,21 +234,23 @@ export default function RunPage() {
 
         <p className="text-sm" style={{ color: phase === "running" ? TEAL : "var(--text-secondary)" }}>{statusText[phase]}</p>
 
-        {total > 0 && (
-          <div className="space-y-3">
-            {(topicsRun || run.depth === "parents" || run.depth === "atomics") ? (
-              <Bar label="Progress" value={done} total={total} text={`${done}/${total} steps`} color={TEAL} />
-            ) : (
-              <>
-                <Bar label="Writing" value={written.done} total={written.total} text={`${written.done}/${written.total} written`} color={TEAL} />
-                <Bar label="AI check and approval" value={checks.done} total={checks.total} text={`${checks.done}/${checks.total} checked · ${counts.approved} approved${counts.flagged > 0 ? ` · ${counts.flagged} need you` : ""}`} color="#2563eb" />
-                <Bar label="Saved to the question database" value={progress.saved} total={savedTotal} text={`${progress.saved}/${savedTotal} saved`} color="#16a34a" />
-              </>
-            )}
-            <p className="text-xs" style={{ color: "var(--text-muted)" }}>{steps.map((s) => `${s.label} ${s.t.done}/${s.total}`).join(" · ")}</p>
-            {summary && <p className="text-xs" style={{ color: "var(--text-secondary)" }}>{summary}</p>}
-          </div>
-        )}
+        <div className="space-y-3">
+          {topicsRun ? (
+            <>
+              <Bar label="Planning" value={stage("plan").done} total={stage("plan").total} text={`${stage("plan").done}/${stage("plan").total} sections`} color={TEAL} />
+              <Bar label="Splitting into topics" value={stage("expand").done} total={stage("expand").total} text={stage("expand").total ? `${stage("expand").done}/${stage("expand").total} topics split` : ""} note="starts after planning" color={TEAL} />
+              <Bar label="Saved to the topic database" value={topicsSaved ? progress.topics : 0} total={progress.topics} text={topicsSaved ? `${topicsSaved.topics} saved` : ""} note="after splitting; you press Save" color="#16a34a" />
+            </>
+          ) : (
+            <>
+              <Bar label="Writing" value={written.done} total={Math.max(written.total, progress.topics)} text={`${written.done}/${Math.max(written.total, progress.topics)} written`} color={TEAL} />
+              <Bar label="AI check and approval" value={checks.done} total={hasCheck ? Math.max(checks.total, progress.topics) : 0} text={hasCheck ? `${checks.done}/${Math.max(checks.total, progress.topics)} checked · ${counts.approved} approved${counts.flagged > 0 ? ` · ${counts.flagged} need you` : ""}` : ""} note={hasCheck ? "starts once questions are written" : "not part of this option"} muted={!hasCheck} color="#2563eb" />
+              <Bar label="Saved to the question database" value={progress.saved} total={hasCheck ? savedTotal : 0} text={hasCheck ? `${progress.saved}/${savedTotal} saved` : ""} note={!hasCheck ? "not part of this option" : auto ? "saves automatically after approval" : "after approval; you press Save"} muted={!hasCheck} color="#16a34a" />
+            </>
+          )}
+          {total > 0 && <p className="text-xs" style={{ color: "var(--text-muted)" }}>{steps.map((s) => `${s.label} ${s.t.done}/${s.total}`).join(" · ")}</p>}
+          {summary && <p className="text-xs" style={{ color: "var(--text-secondary)" }}>{summary}</p>}
+        </div>
 
         {/* The next thing to do, only when there is something to do. */}
         {(!locked && ((topicsRun && progress.topics > 0) || (!auto && counts.auto_passed > 0) || unchecked || (canSaveQuestions && counts.approved > 0))) && (
@@ -360,11 +363,14 @@ export default function RunPage() {
   );
 }
 
-function Bar({ label, value, total, text, color }: { label: string; value: number; total: number; text: string; color: string }) {
+// A bar is always shown, even before its step has started; `note` says when it will. `muted` = not part of this option.
+function Bar({ label, value, total, text, note, muted, color }: { label: string; value: number; total: number; text: string; note?: string; muted?: boolean; color: string }) {
   const pct = total ? Math.min(100, Math.round((value / total) * 100)) : 0;
   return (
-    <div>
-      <div className="flex justify-between text-xs mb-1" style={{ color: "var(--text-muted)" }}><span>{label}</span><span>{text}</span></div>
+    <div style={{ opacity: muted ? 0.55 : 1 }}>
+      <div className="flex justify-between gap-3 text-xs mb-1" style={{ color: "var(--text-muted)" }}>
+        <span>{label}</span><span className="text-right">{value === 0 && note ? note : text || note}</span>
+      </div>
       <div className="h-1.5 rounded-full" style={{ background: "var(--bg-input)" }}><div className="h-1.5 rounded-full" style={{ width: `${pct}%`, background: color }} /></div>
     </div>
   );

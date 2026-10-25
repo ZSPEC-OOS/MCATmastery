@@ -5,6 +5,15 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: Codex run page shows every progress bar from the start
+- Question runs always show **Writing**, **AI check and approval** and **Saved to the question database**, even before a
+  stage has begun. Until a stage starts, its bar shows what it is waiting for ("starts once questions are written",
+  "saves automatically after approval", "after approval; you press Save"). For options that have no AI check or saving
+  (Through parent questions, Through atomic questions) those two bars are dimmed and say "not part of this option".
+- Topics-only runs always show **Planning**, **Splitting into topics** and **Saved to the topic database**.
+- Expected totals are used before tasks exist (one question and one check per topic), so a bar reads 0 of 124, not 0 of 0.
+- **Untested:** written without installed dependencies, so no layout check.
+
 ### Change: parent-only runs are fully automatic, with three progress bars
 - **Depth renamed** "Parent questions only, checked, approved and saved automatically". Press Start once: each parent
   question is written, checked by AI, approved if it passes, and copied to the question database straight away (each
