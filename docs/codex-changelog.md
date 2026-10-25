@@ -5,6 +5,18 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: parent questions only, with practice
+- **New Codex depth: "Parent questions only, with AI check".** Writes one parent question per saved topic and runs the
+  AI verification (blind solve and scientific review, with up to two corrections) on each parent by itself. No atomic
+  questions are written. The atomic stage card is hidden for this depth.
+- **Approve all unchecked:** for "Through parent questions" and "Through atomic questions" (which have no AI check),
+  a button approves every question still in draft, after a warning that no AI check was run. Flagged questions are
+  untouched. API action `approve_drafts`.
+- **Practice:** Codex Study already has a "Parent questions only" mode that uses approved questions; nothing changed there.
+- **Question database:** runs of the new depth can be saved to the question database like fully verified runs.
+- **Untested:** written without installed dependencies, so no type-check beyond syntax. The parent-only verification
+  path has never been run: try one small section first.
+
 ### Change: "Fixing after AI check" state and visible findings
 - **Why:** with every part written, a lesson that the AI check had sent back for correction still read "Writing", which
   looked like nothing had happened. It now reads **Fixing after AI check**, and opening the lesson lists what the reviewer

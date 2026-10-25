@@ -357,6 +357,8 @@ async function runParent(deps: Deps, run: CodexRun, task: CodexTask) {
     revision, current: true, status: "draft", content: value, findings: warnings, model, createdAt: now,
   });
   if (depthAtLeast(run.depth, "atomics")) await deps.store.putTasks([newTask(run.id, "atomic", topic.id, now, `__p${revision}`)]);
+  // Parent questions only, but still checked: verify the parent on its own (no atomic questions exist).
+  else if (run.depth === "parentsChecked") await deps.store.putTasks([newTask(run.id, "verify", topic.id, now, `__p${revision}a1`)]);
 }
 
 // ── Stage 3: atomic questions ───────────────────────────────────────────────
@@ -599,7 +601,7 @@ export function bankedSectionNumbers(runs: CodexRun[], subject: string): Set<num
 export function bankBlockers(run: CodexRun, progress: Progress): string[] {
   const out: string[] = [];
   if (run.banked) return ["Already saved to the database."];
-  if (run.depth !== "verified") out.push("Only runs built through AI verification can be saved.");
+  if (run.depth !== "verified" && run.depth !== "parentsChecked") out.push("Only runs built through AI verification can be saved.");
   if (!run.sections.filter((s) => s.selected).every((s) => s.planned)) out.push("Not every major section has been planned.");
   if (progress.active) out.push("Work remains: press Run until every stage is finished.");
   if (progress.failed > 0) out.push(`${progress.failed} task(s) failed: retry them first.`);

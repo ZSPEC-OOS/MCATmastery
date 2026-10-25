@@ -18,6 +18,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       for (const q of qs) await decide(store, id, q.id, "approve", { now });
       return NextResponse.json({ approved: qs.length });
     }
+    if (body.action === "approve_drafts") {
+      // For runs built without an AI check: approve every question that is still a plain draft (flagged ones are left for you).
+      if ((await store.getRun(id))?.banked) return NextResponse.json({ error: "This run is saved to the database and locked." }, { status: 409 });
+      const qs = (await store.listQuestions(id)).filter((q) => q.current && q.status === "draft");
+      for (const q of qs) await decide(store, id, q.id, "approve", { now });
+      return NextResponse.json({ approved: qs.length });
+    }
     if ((body.action === "approve" || body.action === "reject") && typeof body.questionId === "string") {
       const r = await decide(store, id, body.questionId, body.action, { override: body.override === true, now });
       return NextResponse.json(r, { status: r.ok ? 200 : 409 });
