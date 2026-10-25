@@ -19,24 +19,30 @@ export default function LessonsHome() {
   const [preset, setPreset] = useState("");   // index into SUBCODEX_PRESETS; "" = nothing chosen
   const [picked, setPicked] = useState<Set<number> | null>(null); // null = all sections
   const [auto, setAuto] = useState(true);
+  const [pickedLessons, setPickedLessons] = useState<Set<string>>(new Set()); // lessons (subsections) to write now when automatic is off
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const text = useMemo(() => (preset === "" ? "" : presetText(SUBCODEX_PRESETS[Number(preset)])), [preset]);
   const parsed = useMemo(() => (text ? parseSubCodex(text) : null), [text]);
   // Lessons are written from the shared topic database: only sections saved there (Codex → Topics only → Save) can be built.
-  const { data: bankData } = useSWR<{ sections: { number: number }[] }>(parsed?.ok ? `/api/codex/topic-bank?subject=${encodeURIComponent(parsed.subject ?? "")}` : null, fetcher);
+  const { data: bankData } = useSWR<{ sections: { number: number; id: string; subsections: { id: string; title: string }[] }[] }>(parsed?.ok ? `/api/codex/topic-bank?subject=${encodeURIComponent(parsed.subject ?? "")}` : null, fetcher);
   const savedNumbers = useMemo(() => new Set((bankData?.sections ?? []).map((s) => s.number)), [bankData]);
   const available = parsed?.ok ? parsed.sections.filter((s) => savedNumbers.has(s.number)) : [];
   const availableNumbers = new Set(available.map((s) => s.number));
   const selected = parsed?.ok ? new Set((picked ? [...picked] : available.map((s) => s.number)).filter((n) => availableNumbers.has(n))) : new Set<number>();
+
+  // With automatic lessons off, each chosen section lists its subsections (one lesson each) to pick from.
+  const lessonChoices = (bankData?.sections ?? []).filter((s) => selected.has(s.number));
+  const lessonIds = lessonChoices.flatMap((s) => s.subsections.map((ss) => ss.id));
+  const chosenLessons = lessonIds.filter((id) => pickedLessons.has(id));
 
   async function start() {
     setBusy(true); setError("");
     try {
       const res = await fetch("/api/lessons/runs", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sourceText: text, sectionNumbers: [...selected], autoLessons: auto }),
+        body: JSON.stringify({ sourceText: text, sectionNumbers: [...selected], autoLessons: auto, ...(auto ? {} : { subsectionIds: chosenLessons }) }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.issues?.[0]?.message ?? d.error ?? "Could not start the run");
@@ -105,11 +111,43 @@ export default function LessonsHome() {
 
           <label className="flex items-center gap-2 text-sm" style={{ color: "var(--text-secondary)" }}>
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
-            Write lessons automatically for every topic
+            Write every lesson automatically
           </label>
-          <p className="text-xs -mt-2" style={{ color: "var(--text-muted)" }}>
-            Untick to create the run without writing anything, then develop all lessons or choose individual lessons from the run page.
-          </p>
+          {auto ? (
+            <p className="text-xs -mt-2" style={{ color: "var(--text-muted)" }}>
+              Untick to choose individual lessons (subsections) to write instead.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
+                <span>{chosenLessons.length} of {lessonIds.length} lessons selected</span>
+                <button type="button" style={{ ...btn("ghost"), padding: "2px 8px", fontSize: 11 }} onClick={() => setPickedLessons(new Set(lessonIds))}>Select all</button>
+                <button type="button" style={{ ...btn("ghost"), padding: "2px 8px", fontSize: 11 }} onClick={() => setPickedLessons(new Set())}>Clear</button>
+              </div>
+              {lessonChoices.length === 0 && <p className="text-xs" style={{ color: "var(--text-muted)" }}>Tick a major section above to see its lessons.</p>}
+              {lessonChoices.map((s) => (
+                <div key={s.number} className="p-3" style={card}>
+                  <p className="text-sm font-semibold mb-1" style={{ color: "var(--text-primary)" }}>{s.id}</p>
+                  <ul>
+                    {s.subsections.map((ss) => (
+                      <li key={ss.id}>
+                        <label className="flex items-start gap-2 py-1 text-sm" style={{ color: "var(--text-secondary)" }}>
+                          <input
+                            type="checkbox" className="mt-1" checked={pickedLessons.has(ss.id)}
+                            onChange={(e) => setPickedLessons((p) => { const n = new Set(p); if (e.target.checked) n.add(ss.id); else n.delete(ss.id); return n; })}
+                          />
+                          <span><span className="font-mono text-xs mr-2" style={{ color: "var(--text-muted)" }}>{ss.id}</span>{ss.title}</span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                Only the ticked lessons are written now. You can develop the rest, or pick more, from the run page.
+              </p>
+            </div>
+          )}
 
           <div className="flex items-end gap-3">
             <button style={btn("primary", busy || !parsed?.ok || selected.size === 0)} disabled={busy || !parsed?.ok || selected.size === 0} onClick={start}>

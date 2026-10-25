@@ -25,10 +25,10 @@ export async function POST(req: NextRequest) {
   const user = await requireLessonsUser();
   if (isDenied(user)) return user;
   try {
-    const body = (await req.json()) as { sourceText?: string; sectionNumbers?: number[]; autoLessons?: boolean };
+    const body = (await req.json()) as { sourceText?: string; sectionNumbers?: number[]; autoLessons?: boolean; subsectionIds?: unknown };
     if (typeof body.sourceText !== "string" || !body.sourceText.trim()) return NextResponse.json({ error: "sourceText is required" }, { status: 400 });
     const sectionNumbers = Array.isArray(body.sectionNumbers) ? body.sectionNumbers.filter((n) => Number.isInteger(n)) : undefined;
-    const result = await createRun(getDeps(), { sourceText: body.sourceText, sectionNumbers, autoLessons: body.autoLessons !== false, createdBy: user.id });
+    const result = await createRun(getDeps(), { sourceText: body.sourceText, sectionNumbers, autoLessons: body.autoLessons !== false, subsectionIds: Array.isArray(body.subsectionIds) ? body.subsectionIds.filter((x): x is string => typeof x === "string") : undefined, createdBy: user.id });
     if (!result.ok) return NextResponse.json({ error: "Invalid Sub-Codex", issues: result.errors }, { status: 400 });
     return NextResponse.json({ run: { id: result.run.id } });
   } catch (e) {

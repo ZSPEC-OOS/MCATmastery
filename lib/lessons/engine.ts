@@ -42,8 +42,10 @@ export interface CreateRunInput {
   sourceText: string;
   /** Major-section numbers to build now; empty or omitted = every saved section. */
   sectionNumbers?: number[];
-  /** Write lessons automatically for every topic (default true). */
+  /** Write every lesson automatically (default true). */
   autoLessons?: boolean;
+  /** With autoLessons off: write just these lessons (subsections) now. Anything else is developed later from the run page. */
+  subsectionIds?: string[];
   createdBy: string;
 }
 
@@ -86,6 +88,10 @@ export async function createRun(deps: Deps, input: CreateRunInput): Promise<{ ok
   await deps.store.createRun(run);
   await deps.store.putTopics(topics);
   if (autoLessonsOn(run)) await deps.store.putTasks(topics.map((t) => newTask(run.id, t.id, now)));
+  else if (input.subsectionIds?.length) {
+    const want = new Set(input.subsectionIds);
+    await deps.store.putTasks(topics.filter((t) => want.has(t.subsectionId)).map((t) => newTask(run.id, t.id, now)));
+  }
   return { ok: true, run };
 }
 
