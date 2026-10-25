@@ -10,13 +10,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const { store } = getDeps();
     const run = await store.getRun(id);
     if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
-    const [topics, questions, tasks, progress] = await Promise.all([store.listTopics(id), store.listQuestions(id), store.listTasks(id), getProgress(store, id)]);
+    const [topics, questions, tasks, progress, content] = await Promise.all([store.listTopics(id), store.listQuestions(id), store.listTasks(id), getProgress(store, id), store.listContent(id)]);
     return NextResponse.json({
       run: { ...run, sourceText: undefined },
       topics: topics.sort((a, b) => a.number - b.number),
       questions: questions.filter((q) => q.current),
       failedTasks: tasks.filter((t) => t.status === "failed").map((t) => ({ id: t.id, stage: t.stage, targetId: t.targetId, error: t.error })),
       progress,
+      content,
       bankBlockers: bankBlockers(run, progress),
     });
   } catch (e) {

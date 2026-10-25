@@ -2,7 +2,7 @@
 // the model for a bounded number of repair rounds, warnings are kept on the question for the reviewer.
 
 import { z } from "zod";
-import type { Finding, QuestionContent } from "./types";
+import type { Finding, LessonContent, QuestionContent } from "./types";
 import { ATOMIC_MAX_PER_PARENT, EXPAND_MAX_TARGETS } from "./types";
 
 const words = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
@@ -195,6 +195,38 @@ export const PlanSchema = z.object({
   }).optional(),
 });
 export type Plan = z.infer<typeof PlanSchema>;
+
+// ── Lessons ─────────────────────────────────────────────────────────────────
+
+const LessonSchema = z.object({
+  title: text(300),
+  objectives: z.array(text(400)).min(1).max(8),
+  sections: z.array(z.object({ heading: text(200), body: text(8000) })).min(2).max(12),
+  keyTerms: z.array(z.object({ term: text(200), definition: text(800) })).max(20).default([]),
+  misconceptions: z.array(z.object({ misconception: text(500), correction: text(800) })).max(8).default([]),
+  summary: text(2000),
+  references: z.array(RefSchema).max(8).default([]),
+  sourceBasis: z.string().trim().max(1000).default(""),
+});
+
+export function checkLesson(raw: unknown): Parsed<LessonContent> {
+  const parsed = LessonSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, findings: parsed.error.issues.slice(0, 12).map((i) => err("SCHEMA", `${i.path.join(".") || "lesson"}: ${i.message}`)) };
+  }
+  const l = parsed.data;
+  const findings: Finding[] = [];
+  const total = l.sections.reduce((n, s) => n + words(s.body), 0);
+  if (total < 250) findings.push(err("TOO_SHORT", `The lesson body is ${total} words; write a real reading lesson of at least 250 words.`));
+  const headings = l.sections.map((s) => norm(s.heading));
+  if (new Set(headings).size !== headings.length) findings.push(err("DUPLICATE_HEADING", "Two sections have the same heading."));
+  // Lessons teach; they must not contain practice questions.
+  const quiz = l.sections.filter((s) => /\b(?:which of the following|answer choices?)\b/i.test(s.body));
+  if (quiz.length) findings.push(err("CONTAINS_QUESTIONS", `Section "${quiz[0].heading}" reads like a practice question; this is a reading lesson with no questions.`));
+  if (l.references.length === 0) findings.push(warn("NO_REFERENCES", "No references given; the basis rests on sourceBasis alone."));
+  const blocking = findings.some((f) => f.severity === "error");
+  return { ok: !blocking, value: blocking ? undefined : l, findings };
+}
 
 // ── Topic expansion ─────────────────────────────────────────────────────────
 

@@ -5,9 +5,10 @@ import { useParams } from "next/navigation";
 import useSWR from "swr";
 import CodexNavbar from "../_components/CodexNavbar";
 import QuestionCard from "../_components/QuestionCard";
+import LessonCard from "../_components/LessonCard";
 import { TEAL, btn, card, fetcher, input } from "../_components/ui";
-import { DEPTH_LABELS } from "../../../lib/codex/types";
-import type { CodexQuestion, CodexRun, CodexTopic } from "../../../lib/codex/types";
+import { DEPTH_LABELS, contentOn } from "../../../lib/codex/types";
+import type { CodexContent, CodexQuestion, CodexRun, CodexTopic } from "../../../lib/codex/types";
 import type { Progress } from "../../../lib/codex/engine";
 
 interface Detail {
@@ -16,11 +17,12 @@ interface Detail {
   questions: CodexQuestion[];
   failedTasks: { id: string; stage: string; targetId: string; error?: string }[];
   progress: Progress;
+  content: CodexContent[];
   bankBlockers: string[];
 }
 
 const STAGES: { key: keyof Progress["tasks"]; label: string }[] = [
-  { key: "plan", label: "Topic plans" }, { key: "expand", label: "Topic splits" }, { key: "parent", label: "Parent questions" }, { key: "atomic", label: "Atomic sets" }, { key: "verify", label: "Verification" },
+  { key: "plan", label: "Topic plans" }, { key: "expand", label: "Topic splits" }, { key: "content", label: "Lessons" }, { key: "parent", label: "Parent questions" }, { key: "atomic", label: "Atomic sets" }, { key: "verify", label: "Verification" },
 ];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -90,6 +92,26 @@ export default function RunPage() {
     mutate();
   }
 
+  async function startLessons() {
+    const res = await fetch(`/api/codex/runs/${runId}/content`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start" }) });
+    const d = await res.json();
+    setNotice(res.ok ? `Lessons switched on: ${d.queued} topic(s) queued. Press Run to develop them; topics split later are added automatically.` : (d.error ?? "Could not start lessons"));
+    mutate();
+  }
+
+  async function decideLesson(c: CodexContent, action: "approve" | "reject") {
+    const res = await fetch(`/api/codex/runs/${runId}/content`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, topicId: c.topicId }) });
+    if (!res.ok) setNotice((await res.json()).error ?? "Could not record the decision");
+    mutate();
+  }
+
+  async function approveLessons() {
+    const res = await fetch(`/api/codex/runs/${runId}/content`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "approve_all" }) });
+    const d = await res.json();
+    setNotice(res.ok ? `Approved ${d.approved ?? 0} lesson(s).` : (d.error ?? "Could not approve"));
+    mutate();
+  }
+
   async function saveToDatabase() {
     if (!confirm("Save this run's approved questions to the database? The run will be locked and its sections will disappear from the new-run list until you remove it from the database.")) return;
     setNotice("Saving to the database…");
@@ -117,7 +139,11 @@ export default function RunPage() {
   if (error) return <Shell><p style={{ color: "var(--accent-red)" }}>{error.message}</p></Shell>;
   if (!data) return <Shell><p style={{ color: "var(--text-muted)" }}>Loading…</p></Shell>;
 
-  const { run, topics, questions, progress, failedTasks, bankBlockers } = data;
+  const { run, topics, questions, progress, failedTasks, bankBlockers, content } = data;
+  const lessonsOn = contentOn(run);
+  const contentRun = run.depth === "content";
+  const lessonOf = (tid: string) => content.find((c) => c.topicId === tid);
+  const lessonCounts = { written: content.length, approved: content.filter((c) => c.status === "approved").length, draft: content.filter((c) => c.status === "draft").length };
   const banked = run.banked;
   const current = (qid: string) => questions.find((q) => q.qid === qid && q.current);
   const atomsOf = (id: string) => questions.filter((q) => q.parentId === id).sort((a, b) => a.qid.localeCompare(b.qid, undefined, { numeric: true }));
@@ -161,7 +187,7 @@ export default function RunPage() {
       {running && <p className="text-sm mb-3" style={{ color: TEAL }}>Running — keep this page open. It is safe to pause.</p>}
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 mb-4">
-        {STAGES.map(({ key, label }) => {
+        {STAGES.filter(({ key }) => (key === "content" ? lessonsOn : contentRun ? key === "plan" || key === "expand" : true)).map(({ key, label }) => {
           const t = progress.tasks[key];
           const total = t.queued + t.running + t.done + t.failed;
           const pct = total ? Math.round((t.done / total) * 100) : 0;
@@ -170,6 +196,12 @@ export default function RunPage() {
               <div className="flex justify-between text-xs" style={{ color: "var(--text-muted)" }}><span>{label}</span><span>{t.done}/{total}</span></div>
               <div className="h-1.5 rounded-full mt-2" style={{ background: "var(--bg-input)" }}><div className="h-1.5 rounded-full" style={{ width: `${pct}%`, background: TEAL }} /></div>
               {t.failed > 0 && <p className="text-xs mt-1" style={{ color: "var(--accent-red)" }}>{t.failed} failed</p>}
+              {key === "expand" && !lessonsOn && !banked && t.done > 0 && (
+                <div className="mt-2">
+                  <button style={{ ...btn("ghost"), padding: "4px 10px", fontSize: 12 }} onClick={startLessons}>Develop content</button>
+                  <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Optional: write a reading lesson for each split topic.</p>
+                </div>
+              )}
             </div>
           );
         })}
@@ -188,16 +220,24 @@ export default function RunPage() {
       )}
 
       <section className="p-3 mb-4 flex flex-wrap items-center gap-2" style={card}>
-        <span className="text-sm mr-2" style={{ color: "var(--text-secondary)" }}>
-          <b>{counts.approved}</b> approved · <b>{counts.auto_passed}</b> awaiting you · <b>{counts.flagged}</b> flagged · <b>{counts.rejected}</b> rejected
-        </span>
+        {!contentRun && (
+          <span className="text-sm mr-2" style={{ color: "var(--text-secondary)" }}>
+            <b>{counts.approved}</b> approved · <b>{counts.auto_passed}</b> awaiting you · <b>{counts.flagged}</b> flagged · <b>{counts.rejected}</b> rejected
+          </span>
+        )}
+        {lessonsOn && (
+          <span className="text-sm mr-2" style={{ color: "var(--text-secondary)" }}>
+            Lessons: <b>{lessonCounts.written}</b> written · <b>{lessonCounts.approved}</b> approved · <b>{lessonCounts.draft}</b> awaiting you
+          </span>
+        )}
         <span className="flex-1" />
-        <button style={btn("ghost", counts.auto_passed === 0 || !!banked)} disabled={counts.auto_passed === 0 || !!banked} onClick={approvePassed}>Approve all that passed AI review</button>
+        {lessonsOn && <button style={btn("ghost", lessonCounts.draft === 0 || !!banked)} disabled={lessonCounts.draft === 0 || !!banked} onClick={approveLessons}>Approve all lessons</button>}
+        {!contentRun && <button style={btn("ghost", counts.auto_passed === 0 || !!banked)} disabled={counts.auto_passed === 0 || !!banked} onClick={approvePassed}>Approve all that passed AI review</button>}
         <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/codex/runs/${runId}/export?approved=1`}>Download approved</a>
         <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/codex/runs/${runId}/export`}>Download everything</a>
-        <button style={btn("ghost", counts.approved === 0)} disabled={counts.approved === 0} onClick={() => saveToFirebase(true)}>Save approved to Firebase</button>
-        {!banked && <button style={btn("primary", bankBlockers.length > 0)} disabled={bankBlockers.length > 0} onClick={saveToDatabase}>Save to database</button>}
-        {!banked && bankBlockers.length > 0 && progress.topics > 0 && (
+        {!contentRun && <button style={btn("ghost", counts.approved === 0)} disabled={counts.approved === 0} onClick={() => saveToFirebase(true)}>Save approved to Firebase</button>}
+        {!banked && !contentRun && <button style={btn("primary", bankBlockers.length > 0)} disabled={bankBlockers.length > 0} onClick={saveToDatabase}>Save to database</button>}
+        {!banked && !contentRun && bankBlockers.length > 0 && progress.topics > 0 && (
           <ul className="basis-full text-xs list-disc pl-5" style={{ color: "var(--text-muted)" }}>
             {bankBlockers.map((b) => <li key={b}>{b}</li>)}
           </ul>
@@ -227,11 +267,15 @@ export default function RunPage() {
                         <button className="w-full text-left p-3 flex items-center gap-2" onClick={() => setOpenTopic(open ? null : t.id)}>
                           <span className="text-xs font-mono" style={{ color: "var(--text-muted)", minWidth: 96 }}>{t.id}</span>
                           <span className="flex-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{t.groupTitle && <span className="block text-xs font-normal" style={{ color: "var(--text-muted)" }}>{t.groupTitle}</span>}{t.title}</span>
-                          <span className="text-xs" style={{ color: "var(--text-muted)" }}>{parent ? `1 parent · ${atoms.length} atomic` : "no question yet"}</span>
+                          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+                            {lessonOf(t.id) ? `lesson ${lessonOf(t.id)!.status}` : lessonsOn ? "no lesson yet" : ""}
+                            {!contentRun && `${lessonsOn ? " · " : ""}${parent ? `1 parent · ${atoms.length} atomic` : "no question yet"}`}
+                          </span>
                         </button>
                         {open && (
                           <div className="px-3 pb-3 space-y-2">
                             <p className="text-xs" style={{ color: "var(--text-muted)" }}><b>Scope:</b> {t.scope} <b>Target:</b> {t.primaryLearningTarget}</p>
+                            {lessonOf(t.id) && <LessonCard key={lessonOf(t.id)!.id} c={lessonOf(t.id)!} locked={!!banked} onDecide={decideLesson} />}
                             {parent && <QuestionCard key={parent.id} q={parent} onDecide={decide} />}
                             {atoms.length > 0 && <p className="text-xs font-semibold pt-1" style={{ color: "var(--text-muted)" }}>Atomic questions</p>}
                             {atoms.map((a) => <QuestionCard key={a.id} q={a} onDecide={decide} />)}

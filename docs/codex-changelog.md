@@ -5,6 +5,24 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: reading lessons ("Topics only + content") 
+- **New run type:** *Topics only + content (reading lessons, no questions)*. It plans, splits, then writes one
+  reading lesson per split topic. No questions are generated.
+- **Optional on every other run type:** the **Topic splits** card shows a **Develop content** button once splits
+  exist. Pressing it switches lessons on for that run (even one already in progress) and queues a lesson for every
+  topic whose split has finished. Topics split later are added automatically. Without the button, lessons are never
+  written on the other run types. Press Run to develop them.
+- **Lesson shape:** objectives, titled sections of explanatory prose, key terms, common misconceptions, summary,
+  references and basis. Checks require at least two sections and 250 words and reject quiz-style wording. CARS
+  topics get a skill-teaching variant.
+- **Review:** each topic shows its lesson above its questions, with Approve and Reject; "Approve all lessons" is
+  in the run's action panel. Lessons are stored in the new `codex_content` collection and included in exports.
+- **Task order:** lessons run right after splits, ahead of parent questions, so pressing Develop content on a run
+  mid-way makes lessons the next thing it does.
+- **Not included:** AI verification of lessons, and saving lessons to the Codex database (the database holds
+  questions only for now).
+- **Untested:** written without installed dependencies, so no type-check or run.
+
 ### Change: Codex database ("Save to database") and run locking
 - A finished run gets a **Save to database** button. It copies the run's approved questions into a new Firestore
   collection, `codex_bank`, one document per question with its section, subsection and topic attached. It then
