@@ -200,9 +200,16 @@ export async function callModel(opts: {
     const msg = await anthropic.messages.create({
       model:      modelId ?? "claude-opus-4-7",
       max_tokens: anthropicMaxTokens,
-      system:     opts.system,
+      // The system prompt is the same static text on every call of a stage, so mark it cacheable:
+      // repeat calls within the cache lifetime read it at a fraction of the input price.
+      // Prompts below the model's minimum cacheable length are simply processed normally.
+      system:     [{ type: "text", text: opts.system, cache_control: { type: "ephemeral" } }],
       messages:   [{ role: "user", content: opts.userContent }],
     });
+    const u = msg.usage as { cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null } | undefined;
+    if (u?.cache_read_input_tokens || u?.cache_creation_input_tokens) {
+      console.log(`[model] prompt cache: ${u.cache_read_input_tokens ?? 0} read, ${u.cache_creation_input_tokens ?? 0} written`);
+    }
     const block = msg.content[0];
     if (!block || block.type !== "text" || !block.text) {
       throw new Error(`Anthropic model returned no text content (block type: ${block?.type ?? "none"})`);
