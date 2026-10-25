@@ -5,6 +5,11 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: clearer names for the Codex "What to build" choices
+- Topics only (first step) · Parent questions, I approve them · Parent questions, fully automatic · Parent + atomic
+  questions, I approve them · Parent + atomic questions, AI-checked. The names appear in the selector, the run header and the
+  runs list; the one-line description under the selector was reworded to match.
+
 ### Change: Codex run page shows every progress bar from the start
 - Question runs always show **Writing**, **AI check and approval** and **Saved to the question database**, even before a
   stage has begun. Until a stage starts, its bar shows what it is waiting for ("starts once questions are written",
