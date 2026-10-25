@@ -14,8 +14,9 @@ export default function CodexNavbar() {
             MCAT <span style={{ color: "#0d9488" }}>Codex</span>
           </Link>
           <div className="flex items-center gap-0.5">
-            {[{ href: "/codex", label: "Build" }, { href: "/codex/study", label: "Study" }].map((l) => {
-              const active = l.href === "/codex" ? pathname === "/codex" || (pathname.startsWith("/codex/") && !pathname.startsWith("/codex/study")) : pathname.startsWith(l.href);
+            {[{ href: "/codex", label: "Build" }, { href: "/codex/study", label: "Study" }, { href: "/codex/database", label: "Database" }].map((l) => {
+              const other = pathname.startsWith("/codex/study") || pathname.startsWith("/codex/database");
+              const active = l.href === "/codex" ? pathname === "/codex" || (pathname.startsWith("/codex/") && !other) : pathname.startsWith(l.href);
               return (
                 <Link key={l.href} href={l.href} className="px-3 py-1.5 rounded-lg text-sm" style={{ color: active ? "#0d9488" : "var(--text-secondary)", background: active ? "rgba(13,148,136,0.1)" : "transparent", fontWeight: active ? 600 : 500 }}>
                   {l.label}

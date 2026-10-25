@@ -12,6 +12,7 @@ export default function LessonsNavbar() {
           MCAT <span style={{ color: ACCENT }}>Lessons</span>
         </Link>
         <div className="flex items-center gap-1">
+          <Link href="/codex/database" className="hidden sm:inline px-3 py-1.5 rounded-lg text-sm font-medium" style={{ color: "var(--text-secondary)" }}>Database</Link>
           <Link href="/" className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ color: "var(--text-secondary)" }}>All apps</Link>
           <Link href="/mastery" className="hidden sm:inline px-3 py-1.5 rounded-lg text-sm font-medium" style={{ color: "var(--text-secondary)" }}>Mastery</Link>
           <ThemeToggle />

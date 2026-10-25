@@ -88,6 +88,11 @@ export default function CodexHome() {
                   : `Only sections saved in the topic database can be built into questions: ${savedTopics.size} of ${parsed.sections.length}. Run Topics only and save it to the database first for the rest. `}
                 {bankedNumbers.size > 0 && !topicsOnly && `${bankedNumbers.size} more are hidden because their questions are saved to the question database.`}
               </p>
+              <div className="flex flex-wrap items-center gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
+                <span>{selected.size} of {available.length} selected</span>
+                <button type="button" style={{ ...btn("ghost"), padding: "2px 8px", fontSize: 11 }} onClick={() => setPicked(new Set(available.map((s) => s.number)))}>Select all</button>
+                <button type="button" style={{ ...btn("ghost"), padding: "2px 8px", fontSize: 11 }} onClick={() => setPicked(new Set())}>Clear</button>
+              </div>
               <div className="grid gap-1.5 sm:grid-cols-2">
                 {available.map((s) => (
                   <label key={s.number} className="flex items-center gap-2 text-sm" style={{ color: "var(--text-secondary)" }}>

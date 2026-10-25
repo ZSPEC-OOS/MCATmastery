@@ -5,6 +5,17 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: Database checklist and select-all for the first Topics-only run
+- **Database page** (Codex navbar, also linked from Lessons): pick a subject and see every major section with three
+  checks: topics saved to the topic database, questions saved to the question database, lessons approved out of
+  topics. A section is **Complete** when all three are met. Read-only.
+- **First Topics-only run:** the new-run picker defaults to every section not yet saved (all 16 for Biology) and now
+  has Select all / Clear and an "N of M selected" count.
+- **Trial run left alone:** the earlier Biology run (MS-1, built through parents and atomics) is a trial. It is not
+  migrated into the topic database and nothing here modifies it, so MS-1 still shows as "topics not saved" and can be
+  planned again in the first Topics-only run.
+- **Untested:** written without installed dependencies, so no type-check or run.
+
 ### Change: shared topic database; Codex and Lessons now build from it
 - **Save topics to database (Codex, Topics-only runs):** when a Topics-only run has finished planning and every
   split (no active or failed tasks), **Save topics to database** writes each selected major section and its split
