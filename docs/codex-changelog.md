@@ -10,6 +10,11 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
   every request identical. The static system prompt already comes first; lesson-writing prompts were reordered so the
   lesson title, scope and sibling topics (same for every part of a lesson) precede the topic and part number.
   The AI-check prompt already had its shared lesson context first.
+- Codex: reviewed every stage. Planning prompts now put the subject and curriculum outline (identical for each major
+  section) before the section. Expand, parent, atomic, coverage, solve-blind and review prompts were left as they are:
+  their per-call content (the topic, parent question or question batch) is what differs, and their long fixed
+  instructions already sit in the system prompt at the front, which is the part that gets cached. Retry and
+  correction rounds already append their extra text after the topic, so a retry reuses the first attempt's prefix.
 - `lib/model.ts` logs `[model] prompt cache: N hit, M miss` from DeepSeek's usage report on each call. The Anthropic
   path is unchanged.
 - Caching is best effort and not instant: DeepSeek builds the cache in the background, so hits show on later calls

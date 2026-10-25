@@ -160,9 +160,10 @@ export function renderPlanningPrompt(ctx: {
   }
   return {
     system: ctx.cars ? PLANNING_CARS_SYSTEM : PLANNING_SYSTEM,
+    // Subject and outline are the same for every major section of a run, so they come first (cacheable prefix).
     prompt: `<subject>${data(ctx.subject)}</subject>
-<major_section>${data(ctx.section)}</major_section>
 <curriculum_outline>${data(ctx.outline)}</curriculum_outline>
+<major_section>${data(ctx.section)}</major_section>
 ${extra.join("\n")}
 Plan the topic coverage of the major section above.`,
   };
