@@ -2,7 +2,7 @@
 // touch Mastery's question bank or the Codex collections. Firebase is initialised by Mastery's own
 // FIREBASE_SERVICE_ACCOUNT variable.
 
-import type { LessonPart, LessonReview, LessonStage, LessonTask, LessonTopic, LessonsRun, RunSection } from "./types";
+import type { LessonAiReview, LessonPart, LessonReview, LessonStage, LessonTask, LessonTopic, LessonsRun, RunSection } from "./types";
 import { docId, isLessonStage } from "./types";
 
 export interface LessonsStore {
@@ -31,7 +31,13 @@ export interface LessonsStore {
   listReviews(runId: string): Promise<LessonReview[]>;
   setReview(r: LessonReview): Promise<void>;
   deleteReview(runId: string, subsectionId: string): Promise<void>;
+  listAiReviews(runId: string): Promise<LessonAiReview[]>;
+  setAiReview(r: LessonAiReview): Promise<void>;
+  deleteAiReview(runId: string, subsectionId: string): Promise<void>;
 }
+
+// Write every part first, then check lessons: a correction queued by a check is rewritten before the next check runs.
+const STAGE_RANK: Record<LessonStage, number> = { lesson: 0, review: 1 };
 
 export function pickClaimable(tasks: LessonTask[], now: Date, skipStages: LessonStage[] = []): LessonTask[] {
   const t = now.getTime();
@@ -42,12 +48,12 @@ export function pickClaimable(tasks: LessonTask[], now: Date, skipStages: Lesson
       if (x.status === "running") return !!x.leaseUntil && new Date(x.leaseUntil).getTime() < t;
       return false;
     })
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id, undefined, { numeric: true }));
+    .sort((a, b) => STAGE_RANK[a.stage] - STAGE_RANK[b.stage] || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id, undefined, { numeric: true }));
 }
 
 // ── Firestore ───────────────────────────────────────────────────────────────
 
-const C = { runs: "lessons_runs", tasks: "lessons_tasks", topics: "lessons_topics", parts: "lessons_parts", reviews: "lessons_reviews" } as const;
+const C = { runs: "lessons_runs", tasks: "lessons_tasks", topics: "lessons_topics", parts: "lessons_parts", reviews: "lessons_reviews", aiReviews: "lessons_aireviews" } as const;
 
 /** Firestore rejects `undefined` field values; this strips them from nested data. */
 function clean<T>(v: T): T {
@@ -87,7 +93,7 @@ export function createFirestoreStore(): LessonsStore {
       });
     },
     async deleteRun(id) {
-      for (const name of [C.tasks, C.topics, C.parts, C.reviews]) {
+      for (const name of [C.tasks, C.topics, C.parts, C.reviews, C.aiReviews]) {
         const snap = await col(name).where("runId", "==", id).get();
         for (let i = 0; i < snap.docs.length; i += 400) {
           const batch = fsdb().batch();
@@ -154,6 +160,9 @@ export function createFirestoreStore(): LessonsStore {
     async listReviews(runId) { return byRun<LessonReview>(C.reviews, runId); },
     async setReview(r) { await col(C.reviews).doc(r.id).set(clean(r)); },
     async deleteReview(runId, subsectionId) { await col(C.reviews).doc(docId(runId, subsectionId)).delete(); },
+    async listAiReviews(runId) { return byRun<LessonAiReview>(C.aiReviews, runId); },
+    async setAiReview(r) { await col(C.aiReviews).doc(r.id).set(clean(r)); },
+    async deleteAiReview(runId, subsectionId) { await col(C.aiReviews).doc(docId(runId, subsectionId)).delete(); },
   };
 }
 

@@ -20,13 +20,17 @@ export async function GET(req: NextRequest) {
     const questionsSaved = new Set<number>();
     for (const r of codexRuns) if (r.banked && r.subject === preset.subject) for (const s of r.sections) if (s.selected) questionsSaved.add(s.number);
 
-    // A lesson is a subsection (MS-1-SS-2); it counts once a person has approved the whole lesson in any lessons run.
+    // A lesson is a subsection (MS-1-SS-2); it counts once it is approved (by a person, or passed by the AI reviewer) in any lessons run.
     const approved = new Map<number, Set<string>>();   // section number → approved lesson (subsection) ids
     const lessons = getLessonsStore();
     for (const r of lessonRuns.filter((x) => x.subject === preset.subject)) {
-      for (const rv of await lessons.listReviews(r.id)) {
-        const n = Number(/^MS-(\d+)-SS-/.exec(rv.subsectionId)?.[1]);
-        if (Number.isInteger(n) && rv.status === "approved") (approved.get(n) ?? approved.set(n, new Set()).get(n)!).add(rv.subsectionId);
+      // Approved = a person approved it, or the AI reviewer passed it and no person rejected it.
+      const [human, ai] = await Promise.all([lessons.listReviews(r.id), lessons.listAiReviews(r.id)]);
+      const rejected = new Set(human.filter((h) => h.status === "rejected").map((h) => h.subsectionId));
+      const ok = new Set([...human.filter((h) => h.status === "approved").map((h) => h.subsectionId), ...ai.filter((a) => a.verdict === "pass").map((a) => a.subsectionId)]);
+      for (const ss of ok) {
+        const n = Number(/^MS-(\d+)-SS-/.exec(ss)?.[1]);
+        if (Number.isInteger(n) && !rejected.has(ss)) (approved.get(n) ?? approved.set(n, new Set()).get(n)!).add(ss);
       }
     }
 

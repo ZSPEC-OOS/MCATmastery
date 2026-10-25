@@ -1,13 +1,20 @@
 "use client";
 import { useState } from "react";
-import { Badge, btn } from "./ui";
+import { btn } from "./ui";
 import { isComplete } from "../../../lib/lessons/types";
 import type { Lesson } from "../../../lib/lessons/types";
 
-const PENDING_LABEL: Record<string, { text: string; color: string }> = {
-  not_started: { text: "Not started", color: "var(--text-muted)" },
+// Status chip. Everything a lesson can be, in plain words.
+const LABEL: Record<string, { text: string; color: string }> = {
+  not_chosen: { text: "Not in this run", color: "var(--text-muted)" },
+  not_started: { text: "Queued, not started", color: "var(--text-muted)" },
   writing: { text: "Writing", color: "#d97706" },
   incomplete: { text: "Incomplete", color: "#d97706" },
+  checking: { text: "Awaiting AI check", color: "#2563eb" },
+  ai_approved: { text: "AI approved", color: "#16a34a" },
+  flagged: { text: "Flagged for you", color: "#dc2626" },
+  approved: { text: "Approved", color: "#16a34a" },
+  rejected: { text: "Rejected", color: "#dc2626" },
 };
 
 /** One lesson = one subsection (MS-1-SS-2), shown as organized parts, one per split topic. */
@@ -15,7 +22,10 @@ export default function LessonCard({ lesson, onDecide, defaultOpen = false }: { 
   const [open, setOpen] = useState(defaultOpen);
   const [busy, setBusy] = useState(false);
   const written = lesson.parts.filter((p) => p.part).length;
-  const writing = !isComplete(lesson.status);
+  const notReady = !isComplete(lesson.status) || lesson.status === "checking";
+  const chip = LABEL[!lesson.inRun && lesson.status === "not_started" ? "not_chosen" : lesson.status];
+  const queued = lesson.status === "not_started" && lesson.pending > 0 ? { text: "Queued", color: "var(--text-muted)" } : null;
+  const shown = queued ?? chip;
 
   async function act(action: "approve" | "reject") {
     setBusy(true);
@@ -28,12 +38,30 @@ export default function LessonCard({ lesson, onDecide, defaultOpen = false }: { 
         <span className="text-xs font-mono mt-0.5" style={{ color: "var(--text-muted)", minWidth: 84 }}>{lesson.subsectionId}</span>
         <span className="flex-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{lesson.title}</span>
         <span className="text-xs mt-0.5 whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{written}/{lesson.parts.length} parts</span>
-        {writing ? <span className="text-xs mt-0.5 whitespace-nowrap" style={{ color: PENDING_LABEL[lesson.status].color }}>{PENDING_LABEL[lesson.status].text}</span> : <Badge status={lesson.status} />}
+        <span className="text-xs mt-0.5 whitespace-nowrap font-semibold" style={{ color: shown.color }}>{shown.text}</span>
       </button>
 
       {open && (
         <div className="px-3 pb-3 space-y-4 text-sm" style={{ color: "var(--text-secondary)" }}>
           {lesson.scope && <p className="italic">{lesson.scope}</p>}
+
+          {lesson.ai && (
+            <div className="rounded-lg p-3 space-y-1.5" style={{ border: `1px solid ${lesson.ai.verdict === "pass" ? "rgba(22,163,74,0.4)" : "rgba(220,38,38,0.4)"}`, background: "var(--bg-card)" }}>
+              <b style={{ color: lesson.ai.verdict === "pass" ? "#16a34a" : "#dc2626" }}>
+                AI check: {lesson.ai.verdict === "pass" ? "passed" : "errors remain, needs your decision"}
+                {lesson.ai.round > 0 ? ` (after ${lesson.ai.round} correction round${lesson.ai.round === 1 ? "" : "s"})` : ""}
+              </b>
+              {lesson.ai.issues.length > 0 && (
+                <ul className="list-disc pl-5 space-y-0.5 text-xs">
+                  {lesson.ai.issues.map((i, k) => (
+                    <li key={k} style={{ color: i.severity === "error" ? "#dc2626" : undefined }}>
+                      <b>{i.severity === "error" ? "Error" : "Note"}</b>{i.topicId ? ` · ${lesson.parts.find((p) => p.topic.id === i.topicId)?.topic.title ?? i.topicId}` : ""}: {i.message}{i.suggestedFix ? ` Fix: ${i.suggestedFix}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           <div>
             <b style={{ color: "var(--text-primary)" }}>In this lesson</b>
@@ -76,15 +104,15 @@ export default function LessonCard({ lesson, onDecide, defaultOpen = false }: { 
                 <div>Basis: {part.content.sourceBasis || "not stated"}</div>
                 {part.content.references.length > 0 && <div>References (model-stated, not verified): {part.content.references.map((r) => r.citation).join("; ")}</div>}
                 {part.findings.map((f, j) => <div key={j} style={{ color: "#d97706" }}>{f.message}</div>)}
-                {part.model && <div>Model: {part.model}</div>}
+                {part.model && <div>Model: {part.model}{part.corrections ? ` · rewritten ${part.corrections}× after the AI check` : ""}</div>}
               </div>
             </section>
           ))}
 
           <div className="flex flex-wrap items-center gap-2 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
-            <button style={btn("primary", busy || writing || lesson.status === "approved")} disabled={busy || writing || lesson.status === "approved"} onClick={() => act("approve")}>{lesson.status === "rejected" ? "Approve instead" : "Approve lesson"}</button>
-            <button style={btn("danger", busy || writing || lesson.status === "rejected")} disabled={busy || writing || lesson.status === "rejected"} onClick={() => act("reject")}>Reject lesson</button>
-            {writing && <span className="text-xs" style={{ color: "var(--text-muted)" }}>A lesson can be approved once every part is written.</span>}
+            <button style={btn("primary", busy || notReady || lesson.status === "approved")} disabled={busy || notReady || lesson.status === "approved"} onClick={() => act("approve")}>{lesson.status === "rejected" ? "Approve instead" : lesson.status === "ai_approved" ? "Confirm approval" : "Approve lesson"}</button>
+            <button style={btn("danger", busy || notReady || lesson.status === "rejected")} disabled={busy || notReady || lesson.status === "rejected"} onClick={() => act("reject")}>Reject lesson</button>
+            <span className="text-xs" style={{ color: "var(--text-muted)" }}>{notReady ? "Available once every part is written and the AI check is done." : "Your decision is optional and overrides the AI check."}</span>
           </div>
         </div>
       )}

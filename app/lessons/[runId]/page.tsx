@@ -32,9 +32,10 @@ export default function RunPage() {
 
   const addLog = useCallback((line: string) => setLog((l) => [`${new Date().toLocaleTimeString()}  ${line}`, ...l].slice(0, 12)), []);
 
-  const start = useCallback(async () => {
+  // The loop that does the work: one step per request, saved after every step. Nothing calls it until you press Start.
+  const runLoop = useCallback(async () => {
     if (live.current) return;
-    live.current = true; setRunning(true); setNotice("");
+    live.current = true; setRunning(true);
     const worker = async () => {
       let errors = 0;
       while (live.current) {
@@ -49,10 +50,10 @@ export default function RunPage() {
           await sleep(3000); continue;
         }
         if (!d.ran) {
-          if (d.progress.active) { await sleep(2500); continue; } // other workers busy, or a task is backing off
+          if (d.progress.active) { await sleep(2500); continue; } // other workers busy, or a step is backing off
           break;
         }
-        addLog(`${d.ran.stage} ${d.ran.targetId}: ${d.ran.outcome}${d.error ? ` — ${d.error.slice(0, 140)}` : ""}`);
+        addLog(`${d.ran.stage === "review" ? "AI check" : "write"} ${d.ran.targetId}: ${d.ran.outcome}${d.error ? ` — ${d.error.slice(0, 140)}` : ""}`);
         errors = d.ran.outcome === "done" ? 0 : errors + (d.ran.outcome === "failed" ? 0 : 1);
         if (errors >= 3) { addLog("Stopped after repeated errors. Check the model in Admin → Settings."); break; }
         if (Date.now() - lastMutate.current > 1500) { lastMutate.current = Date.now(); mutate(); }
@@ -62,38 +63,44 @@ export default function RunPage() {
     live.current = false; setRunning(false); mutate();
   }, [runId, concurrency, mutate, addLog]);
 
-  const pause = () => { live.current = false; };
+  async function post(action: string, extra: Record<string, unknown> = {}) {
+    const res = await fetch(`/api/lessons/runs/${runId}/lessons`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...extra }) });
+    return { ok: res.ok, d: await res.json() };
+  }
 
-  // The lesson-chooser page sends you here with ?autostart=1 after queuing lessons.
-  const autoStarted = useRef(false);
-  useEffect(() => {
-    if (autoStarted.current || !data || typeof window === "undefined") return;
-    if (new URLSearchParams(window.location.search).get("autostart") !== "1") return;
-    autoStarted.current = true;
-    window.history.replaceState({}, "", window.location.pathname);
-    if (data.progress.active) start();
-  }, [data, start]);
+  async function onStart() {
+    setNotice("");
+    const { ok, d } = await post("start");
+    if (!ok) { setNotice(d.error ?? "Could not start"); return; }
+    await mutate();
+    runLoop();
+  }
 
-  async function decide(l: Lesson, action: "approve" | "reject") {
-    const res = await fetch(`/api/lessons/runs/${runId}/lessons`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, subsectionId: l.subsectionId }) });
-    if (!res.ok) setNotice((await res.json()).error ?? "Could not record the decision");
+  async function onPause() {
+    live.current = false;                 // this page stops after the step in flight
+    await post("pause");                  // and nothing else (another tab) picks up new work
+    setNotice("Paused. A step already in progress will finish first. Press Resume to continue.");
     mutate();
   }
 
-  async function lessonAction(action: "start" | "pause" | "resume" | "stop" | "approve_all") {
-    if (action === "stop" && !confirm("Stop lessons? Lessons not yet started are dropped and automatic lessons switch off. Lessons already written are kept.")) return;
-    const res = await fetch(`/api/lessons/runs/${runId}/lessons`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
-    const d = await res.json();
-    if (!res.ok) { setNotice(d.error ?? "Could not update lessons"); return; }
-    setNotice(
-      action === "start" ? `Lessons switched on: ${d.queued} topic(s) queued.`
-        : action === "pause" ? "Lessons paused."
-          : action === "resume" ? "Lessons resumed."
-            : action === "stop" ? `Lessons stopped: ${d.dropped ?? 0} queued lesson(s) dropped.`
-              : `Approved ${d.approved ?? 0} lesson(s).`,
-    );
-    await mutate();
-    if ((action === "start" && d.queued > 0) || action === "resume") start();
+  async function onStop() {
+    if (!confirm("Stop? Everything still queued is dropped. Parts already written are kept, and a step in progress finishes. You can add lessons again later.")) return;
+    live.current = false;
+    const { ok, d } = await post("stop");
+    setNotice(ok ? `Stopped. ${d.dropped ?? 0} queued step(s) dropped.` : (d.error ?? "Could not stop"));
+    mutate();
+  }
+
+  async function decide(l: Lesson, action: "approve" | "reject") {
+    const { ok, d } = await post(action, { subsectionId: l.subsectionId });
+    if (!ok) setNotice(d.error ?? "Could not record the decision");
+    mutate();
+  }
+
+  async function confirmAll() {
+    const { ok, d } = await post("approve_all");
+    setNotice(ok ? `Confirmed ${d.approved ?? 0} AI-approved lesson(s).` : (d.error ?? "Could not confirm"));
+    mutate();
   }
 
   async function retry() {
@@ -105,71 +112,77 @@ export default function RunPage() {
   if (!data) return <Shell><p style={{ color: "var(--text-muted)" }}>Loading…</p></Shell>;
 
   const { run, lessons, progress, failedTasks } = data;
-  const unfinished = progress.active;
-  const lt = progress.tasks.lesson;
-  const lessonsPending = lt.queued + lt.running;
-  const autoOn = run.autoLessons !== false;
-  const lessonTotal = lt.queued + lt.running + lt.done + lt.failed;
-  const lessonPct = lessonTotal ? Math.round((lt.done / lessonTotal) * 100) : 0;
+  const L = progress.lessons;
+  const waiting = progress.tasks.lesson.queued + progress.tasks.lesson.running + progress.tasks.review.queued + progress.tasks.review.running;
+  const paused = run.lessonsPaused === true;
+
+  // One honest status for the whole run.
+  const unfinished = lessons.filter((l) => l.inRun && (l.status === "incomplete" || l.status === "checking")).length;
+  const phase = running ? "running" : paused ? "paused" : progress.active ? "ready" : unfinished > 0 ? "stopped" : L.inRun === 0 ? "empty" : "finished";
+  const finished = phase === "finished";
+  const statusText: Record<string, string> = {
+    running: "Running. Keep this page open; it is safe to pause.",
+    paused: `Paused. ${waiting} step${waiting === 1 ? "" : "s"} waiting. Press Resume to continue.`,
+    ready: `Ready. ${L.inRun} lesson${L.inRun === 1 ? "" : "s"} chosen (${L.partsTotal} parts). Nothing runs until you press Start.`,
+    stopped: `Stopped. ${unfinished} lesson${unfinished === 1 ? " is" : "s are"} not finished. Press Start to continue ${unfinished === 1 ? "it" : "them"}.`,
+    empty: "No lessons chosen yet. Use Add lessons to choose some.",
+    finished: "Finished. Everything chosen has been written and checked.",
+  };
+  const approvedCount = L.aiApproved + L.approved;
+  const pct = L.partsTotal ? Math.round((L.partsDone / L.partsTotal) * 100) : 0;
 
   return (
     <Shell>
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-        <div>
-          <Link href="/lessons" className="text-xs" style={{ color: "var(--text-muted)" }}>← All runs</Link>
-          <h1 className="text-2xl" style={{ color: "var(--text-primary)" }}>{run.subject}</h1>
-          <p className="text-xs" style={{ color: "var(--text-muted)" }}>Reading lessons, one per subsection · started {new Date(run.createdAt).toLocaleString()}</p>
-        </div>
+      <div className="mb-4">
+        <Link href="/lessons" className="text-xs" style={{ color: "var(--text-muted)" }}>← All runs</Link>
+        <h1 className="text-2xl" style={{ color: "var(--text-primary)" }}>{run.subject}</h1>
+        <p className="text-xs" style={{ color: "var(--text-muted)" }}>One lesson per subsection · started {new Date(run.createdAt).toLocaleString()}</p>
+      </div>
+
+      <section className="p-4 mb-4 space-y-3" style={card} aria-label="Run controls">
         <div className="flex flex-wrap items-center gap-2">
+          <button style={btn("primary", running || phase === "empty" || phase === "finished")} disabled={running || phase === "empty" || phase === "finished"} onClick={onStart}>
+            {paused || phase === "stopped" ? "Resume" : "Start"}
+          </button>
+          <button style={btn("ghost", !running)} disabled={!running} onClick={onPause}>Pause</button>
+          <button style={btn("danger", !(progress.active || paused))} disabled={!(progress.active || paused)} onClick={onStop}>Stop</button>
+          <span className="flex-1" />
           <label className="text-xs" style={{ color: "var(--text-muted)" }}>Parallel
             <select value={concurrency} disabled={running} onChange={(e) => setConcurrency(Number(e.target.value))} style={{ ...input, width: 64, marginLeft: 6, padding: "6px 8px" }}>
               {[1, 2, 3].map((n) => <option key={n}>{n}</option>)}
             </select>
           </label>
-          {running
-            ? <button style={btn("ghost")} onClick={pause}>Pause</button>
-            : <button style={btn("primary", !unfinished)} disabled={!unfinished} onClick={start}>{unfinished ? "Run" : "Finished"}</button>}
         </div>
-      </div>
 
-      {unfinished && !running && (
-        <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>
-          Work remains. Press <b>Run</b> to continue. Progress is saved after every step, so you can pause or close this page at any time.
-        </p>
-      )}
-      {running && <p className="text-sm mb-3" style={{ color: ACCENT }}>Running. Keep this page open. It is safe to pause.</p>}
+        <p className="text-sm" style={{ color: phase === "running" ? ACCENT : "var(--text-secondary)" }}>{statusText[phase]}</p>
 
-      <section className="mb-4">
-        <div className="p-3" style={card}>
-          <div className="flex justify-between text-xs" style={{ color: "var(--text-muted)" }}><span>Lessons: {progress.lessons.written}/{progress.lessons.total} complete · parts written</span><span>{lt.done}/{lessonTotal}</span></div>
-          <div className="h-1.5 rounded-full mt-2" style={{ background: "var(--bg-input)" }}><div className="h-1.5 rounded-full" style={{ width: `${lessonPct}%`, background: ACCENT }} /></div>
-          {lt.failed > 0 && <p className="text-xs mt-1" style={{ color: "var(--accent-red)" }}>{lt.failed} failed</p>}
+        {L.inRun > 0 && (
+          <div>
+            <div className="flex justify-between text-xs mb-1" style={{ color: "var(--text-muted)" }}>
+              <span>Parts written</span><span>{L.partsDone}/{L.partsTotal}</span>
+            </div>
+            <div className="h-1.5 rounded-full" style={{ background: "var(--bg-input)" }}><div className="h-1.5 rounded-full" style={{ width: `${pct}%`, background: ACCENT }} /></div>
+            <p className="text-xs mt-2" style={{ color: "var(--text-secondary)" }}>
+              {L.complete}/{L.inRun} lessons written · {approvedCount} approved{L.checking > 0 ? ` · ${L.checking} awaiting AI check` : ""}{L.flagged > 0 ? ` · ${L.flagged} flagged for you` : ""}{L.rejected > 0 ? ` · ${L.rejected} rejected` : ""}
+            </p>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+          <Link href={`/lessons/${runId}/choose`} style={{ ...btn("ghost"), textDecoration: "none" }}>Add lessons</Link>
+          <Link href={`/lessons/${runId}/read`} style={{ ...btn("ghost"), textDecoration: "none" }}>Read lessons</Link>
+          <button style={btn("ghost", L.aiApproved === 0)} disabled={L.aiApproved === 0} onClick={confirmAll}>Confirm all AI-approved ({L.aiApproved})</button>
+          <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/lessons/runs/${runId}/export?approved=1`}>Download approved</a>
+          <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/lessons/runs/${runId}/export`}>Download all</a>
         </div>
-      </section>
-
-      <section className="p-3 mb-4 flex flex-wrap items-center gap-2" style={card} aria-label="Lessons toolbar">
-        <span className="text-sm font-semibold mr-1" style={{ color: "var(--text-primary)" }}>Lessons</span>
-        <span className="text-xs mr-2" style={{ color: "var(--text-muted)" }}>
-          {progress.lessons.written}/{progress.lessons.total} lessons written · {progress.lessons.writing} in progress · {progress.lessons.approved} approved · {progress.lessons.draft} awaiting you
-          {lessonsPending > 0 ? ` · ${lessonsPending} part(s) left` : ""}{run.lessonsPaused ? " · paused" : ""}{!autoOn ? " · automatic lessons off" : ""}
-        </span>
-        <span className="flex-1" />
-        {lessons.length > 0 && (!autoOn || (lessonsPending === 0 && !run.lessonsPaused)) && <button style={btn("primary")} onClick={() => lessonAction("start")}>Develop lessons</button>}
-        {!run.lessonsPaused && lessonsPending > 0 && <button style={btn("ghost")} onClick={() => lessonAction("pause")}>Pause lessons</button>}
-        {run.lessonsPaused && <button style={btn("primary")} onClick={() => lessonAction("resume")}>Resume lessons</button>}
-        {lt.queued > 0 && <button style={btn("danger")} onClick={() => lessonAction("stop")}>Stop</button>}
-        <button style={btn("ghost", progress.lessons.draft === 0)} disabled={progress.lessons.draft === 0} onClick={() => lessonAction("approve_all")}>Approve all lessons</button>
-        <Link href={`/lessons/${runId}/choose`} style={{ ...btn("ghost"), textDecoration: "none" }}>Choose lessons</Link>
-        <Link href={`/lessons/${runId}/read`} style={{ ...btn("ghost"), textDecoration: "none" }}>Read lessons</Link>
-        <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/lessons/runs/${runId}/export?approved=1`}>Download approved</a>
-        <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/lessons/runs/${runId}/export`}>Download everything</a>
       </section>
       {notice && <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>{notice}</p>}
+      {finished && L.flagged > 0 && <p className="text-sm mb-3" style={{ color: "var(--accent-red)" }}>{L.flagged} lesson(s) still had errors after the AI check and corrections. Open them to decide.</p>}
 
       {failedTasks.length > 0 && (
         <div className="p-3 mb-4 text-sm" style={{ ...card, borderColor: "var(--accent-red)" }}>
           <div className="flex items-center justify-between gap-2">
-            <b style={{ color: "var(--accent-red)" }}>{failedTasks.length} task(s) failed</b>
+            <b style={{ color: "var(--accent-red)" }}>{failedTasks.length} step(s) failed</b>
             <button style={btn("ghost")} onClick={retry}>Retry failed</button>
           </div>
           <ul className="mt-2 text-xs space-y-1" style={{ color: "var(--text-secondary)" }}>

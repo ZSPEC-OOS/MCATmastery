@@ -20,7 +20,9 @@ export async function GET(req: NextRequest) {
     const lessons = getLessonsStore();
     const approved = new Set<string>();
     for (const r of (await lessons.listRuns()).filter((x) => x.subject === subject)) {
-      for (const rv of await lessons.listReviews(r.id)) if (rv.status === "approved") approved.add(rv.subsectionId);
+      const [human, ai] = await Promise.all([lessons.listReviews(r.id), lessons.listAiReviews(r.id)]);
+      const rejected = new Set(human.filter((h) => h.status === "rejected").map((h) => h.subsectionId));
+      for (const ss of [...human.filter((h) => h.status === "approved").map((h) => h.subsectionId), ...ai.filter((a) => a.verdict === "pass").map((a) => a.subsectionId)]) if (!rejected.has(ss)) approved.add(ss);
     }
 
     return NextResponse.json({
