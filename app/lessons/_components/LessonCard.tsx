@@ -1,16 +1,21 @@
 "use client";
 import { useState } from "react";
 import { Badge, btn } from "./ui";
+import { isComplete } from "../../../lib/lessons/types";
 import type { Lesson } from "../../../lib/lessons/types";
 
-const STATUS_LABEL: Record<string, string> = { writing: "Writing", draft: "draft", approved: "approved", rejected: "rejected" };
+const PENDING_LABEL: Record<string, { text: string; color: string }> = {
+  not_started: { text: "Not started", color: "var(--text-muted)" },
+  writing: { text: "Writing", color: "#d97706" },
+  incomplete: { text: "Incomplete", color: "#d97706" },
+};
 
 /** One lesson = one subsection (MS-1-SS-2), shown as organized parts, one per split topic. */
 export default function LessonCard({ lesson, onDecide, defaultOpen = false }: { lesson: Lesson; onDecide: (l: Lesson, action: "approve" | "reject") => Promise<void>; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const [busy, setBusy] = useState(false);
   const written = lesson.parts.filter((p) => p.part).length;
-  const writing = lesson.status === "writing";
+  const writing = !isComplete(lesson.status);
 
   async function act(action: "approve" | "reject") {
     setBusy(true);
@@ -23,7 +28,7 @@ export default function LessonCard({ lesson, onDecide, defaultOpen = false }: { 
         <span className="text-xs font-mono mt-0.5" style={{ color: "var(--text-muted)", minWidth: 84 }}>{lesson.subsectionId}</span>
         <span className="flex-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{lesson.title}</span>
         <span className="text-xs mt-0.5 whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{written}/{lesson.parts.length} parts</span>
-        {writing ? <span className="text-xs mt-0.5" style={{ color: "#d97706" }}>{STATUS_LABEL.writing}</span> : <Badge status={lesson.status} />}
+        {writing ? <span className="text-xs mt-0.5 whitespace-nowrap" style={{ color: PENDING_LABEL[lesson.status].color }}>{PENDING_LABEL[lesson.status].text}</span> : <Badge status={lesson.status} />}
       </button>
 
       {open && (

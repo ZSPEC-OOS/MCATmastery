@@ -9,7 +9,7 @@ import { btn, fetcher, input } from "../../_components/ui";
 import type { Lesson, LessonsRun } from "../../../../lib/lessons/types";
 
 interface Detail { run: Omit<LessonsRun, "sourceText">; lessons: Lesson[] }
-type Filter = "all" | "writing" | "draft" | "approved" | "rejected";
+type Filter = "all" | "not_started" | "writing" | "incomplete" | "draft" | "approved" | "rejected";
 
 // Read and review the lessons, in learning order.
 export default function ReadLessons() {
@@ -24,7 +24,7 @@ export default function ReadLessons() {
 
   const { run, lessons } = data;
   const shown = (l: Lesson) => filter === "all" || l.status === filter;
-  const counts = { writing: lessons.filter((l) => l.status === "writing").length, draft: lessons.filter((l) => l.status === "draft").length, approved: lessons.filter((l) => l.status === "approved").length, rejected: lessons.filter((l) => l.status === "rejected").length };
+  const counts = { notStarted: lessons.filter((l) => l.status === "not_started").length, writing: lessons.filter((l) => l.status === "writing" || l.status === "incomplete").length, draft: lessons.filter((l) => l.status === "draft").length, approved: lessons.filter((l) => l.status === "approved").length, rejected: lessons.filter((l) => l.status === "rejected").length };
 
   async function decide(l: Lesson, action: "approve" | "reject") {
     const res = await fetch(`/api/lessons/runs/${runId}/lessons`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, subsectionId: l.subsectionId }) });
@@ -43,13 +43,15 @@ export default function ReadLessons() {
     <Shell runId={runId}>
       <h1 className="text-2xl mb-1" style={{ color: "var(--text-primary)" }}>Lessons</h1>
       <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
-        {run.subject}: {lessons.length} lesson(s), one per subsection · {counts.writing} still writing · {counts.draft} awaiting you · {counts.approved} approved · {counts.rejected} rejected
+        {run.subject}: {lessons.length} lesson(s), one per subsection · {counts.notStarted} not started · {counts.writing} writing or incomplete · {counts.draft} awaiting you · {counts.approved} approved · {counts.rejected} rejected
       </p>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <select value={filter} onChange={(e) => setFilter(e.target.value as Filter)} style={{ ...input, width: "auto" }} aria-label="Filter lessons">
           <option value="all">All lessons</option>
-          <option value="writing">Still writing</option>
+          <option value="not_started">Not started</option>
+          <option value="writing">Writing</option>
+          <option value="incomplete">Incomplete</option>
           <option value="draft">Awaiting review</option>
           <option value="approved">Approved</option>
           <option value="rejected">Rejected</option>

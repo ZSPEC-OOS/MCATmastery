@@ -119,7 +119,12 @@ export interface LessonReview {
   decidedAt: string;
 }
 
-export type LessonStatus = "writing" | "draft" | "approved" | "rejected";
+/**
+ * not_started: nothing written and nothing queued. writing: parts are queued or running. incomplete: some parts exist
+ * but none are queued (stopped, paused-then-stopped or failed). The rest need every part to exist.
+ */
+export type LessonStatus = "not_started" | "writing" | "incomplete" | "draft" | "approved" | "rejected";
+export const isComplete = (s: LessonStatus) => s === "draft" || s === "approved" || s === "rejected";
 
 /** A lesson as the pages show it, assembled from its parts. */
 export interface Lesson {
@@ -129,11 +134,12 @@ export interface Lesson {
   sectionId: string;
   topicIds: string[];       // every part the lesson will have, in order
   parts: { topic: LessonTopic; part: LessonPart | null }[];
-  status: LessonStatus;     // "writing" until every part exists
+  status: LessonStatus;
 }
 
-export function assembleLessons(run: LessonsRun, topics: LessonTopic[], parts: LessonPart[], reviews: LessonReview[]): Lesson[] {
+export function assembleLessons(run: LessonsRun, topics: LessonTopic[], parts: LessonPart[], reviews: LessonReview[], tasks: LessonTask[] = []): Lesson[] {
   const byTopic = new Map(parts.map((p) => [p.topicId, p]));
+  const pending = new Set(tasks.filter((t) => t.status === "queued" || t.status === "running").map((t) => t.targetId));
   const review = new Map(reviews.map((r) => [r.subsectionId, r]));
   const out: Lesson[] = [];
   for (const sec of run.sections.filter((x) => x.selected)) {
@@ -143,7 +149,9 @@ export function assembleLessons(run: LessonsRun, topics: LessonTopic[], parts: L
       const complete = rows.length > 0 && rows.every((r) => r.part);
       out.push({
         subsectionId: ss.id, title: ss.title, scope: ss.scope, sectionId: sec.id, topicIds: mine.map((t) => t.id), parts: rows,
-        status: !complete ? "writing" : (review.get(ss.id)?.status ?? "draft"),
+        status: complete ? (review.get(ss.id)?.status ?? "draft")
+          : mine.some((t) => pending.has(t.id)) ? "writing"
+            : rows.some((r) => r.part) ? "incomplete" : "not_started",
       });
     }
   }

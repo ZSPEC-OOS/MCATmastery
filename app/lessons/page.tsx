@@ -10,7 +10,7 @@ import { SUBCODEX_PRESETS, presetText } from "../../lib/codex/presets";
 
 interface RunRow {
   id: string; subject: string; status: string; createdAt: string; sections: number;
-  progress: { active: boolean; failed: number; topics: number; lessons: { total: number; written: number; draft: number; approved: number; rejected: number; parts: number } };
+  progress: { active: boolean; failed: number; topics: number; lessons: { total: number; written: number; writing: number; draft: number; approved: number; rejected: number; parts: number } };
 }
 
 export default function LessonsHome() {
