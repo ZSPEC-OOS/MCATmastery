@@ -9,6 +9,7 @@ const LABEL: Record<string, { text: string; color: string }> = {
   not_chosen: { text: "Not in this run", color: "var(--text-muted)" },
   not_started: { text: "Queued, not started", color: "var(--text-muted)" },
   writing: { text: "Writing", color: "#d97706" },
+  fixing: { text: "Fixing after AI check", color: "#d97706" },
   incomplete: { text: "Incomplete", color: "#d97706" },
   checking: { text: "Awaiting AI check", color: "#2563eb" },
   ai_approved: { text: "AI approved", color: "#16a34a" },
@@ -70,6 +71,17 @@ export default function LessonCard({ lesson, onDecide, onQueue, defaultOpen = fa
       {open && (
         <div className="px-3 pb-3 space-y-4 text-sm" style={{ color: "var(--text-secondary)" }}>
           {lesson.scope && <p className="italic">{lesson.scope}</p>}
+
+          {lesson.fixing && (
+            <div className="rounded-lg p-3 space-y-1.5" style={{ border: "1px solid rgba(217,119,6,0.4)", background: "var(--bg-card)" }}>
+              <b style={{ color: "#d97706" }}>The AI check found problems. {lesson.fixing.parts} part{lesson.fixing.parts === 1 ? " is" : "s are"} being rewritten (round {lesson.fixing.round}), then the lesson is checked again.</b>
+              <ul className="list-disc pl-5 space-y-0.5 text-xs">
+                {lesson.fixing.issues.map((i, k) => (
+                  <li key={k}>{i.topicId ? `${lesson.parts.find((p) => p.topic.id === i.topicId)?.topic.title ?? i.topicId}: ` : ""}{i.message}{i.suggestedFix ? ` Fix: ${i.suggestedFix}` : ""}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {lesson.ai && (
             <div className="rounded-lg p-3 space-y-1.5" style={{ border: `1px solid ${lesson.ai.verdict === "pass" ? "rgba(22,163,74,0.4)" : "rgba(220,38,38,0.4)"}`, background: "var(--bg-card)" }}>

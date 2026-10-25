@@ -133,7 +133,7 @@ export async function getProgress(store: LessonsStore, runId: string): Promise<P
     lessons: {
       inRun: lessons.length,
       complete: lessons.filter((l) => isComplete(l.status)).length,
-      writing: count((s) => s === "writing"),
+      writing: count((s) => s === "writing" || s === "fixing"),
       checking: count((s) => s === "checking"),
       aiApproved: count((s) => s === "ai_approved"),
       flagged: count((s) => s === "flagged"),

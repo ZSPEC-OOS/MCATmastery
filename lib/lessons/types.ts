@@ -159,12 +159,13 @@ export interface LessonReading {
 export const readingId = (userId: string, runId: string, subsectionId: string) => [userId, runId, subsectionId].join("__");
 
 /**
- * not_started: nothing written and nothing queued. writing: parts queued or running. incomplete: some parts exist but
+ * not_started: nothing written and nothing queued. writing: parts queued or running. fixing: every part exists but the AI
+ * check sent some back and they are being rewritten. incomplete: some parts exist but
  * none are queued. checking: every part exists, the AI check has not finished. ai_approved: the AI reviewer passed it
  * (after corrections if it needed any). flagged: the AI reviewer still found errors after the allowed corrections.
  * approved / rejected: a person decided.
  */
-export type LessonStatus = "not_started" | "writing" | "incomplete" | "checking" | "ai_approved" | "flagged" | "approved" | "rejected";
+export type LessonStatus = "not_started" | "writing" | "fixing" | "incomplete" | "checking" | "ai_approved" | "flagged" | "approved" | "rejected";
 export const isComplete = (s: LessonStatus) => s === "checking" || s === "ai_approved" || s === "flagged" || s === "approved" || s === "rejected";
 /** Counts as approved for the Database checklist: passed by the AI or approved by a person, and not rejected. */
 export const isApproved = (s: LessonStatus) => s === "ai_approved" || s === "approved";
@@ -179,6 +180,8 @@ export interface Lesson {
   parts: { topic: LessonTopic; part: LessonPart | null }[];
   status: LessonStatus;
   ai: { verdict: "pass" | "fail"; issues: ReviewIssue[]; round: number } | null;
+  /** While parts are being rewritten after an AI check: which round, how many parts, and what the reviewer found. */
+  fixing: { round: number; parts: number; issues: ReviewIssue[] } | null;
   /** Part and review tasks queued or running for this lesson. */
   pending: number;
   /** True when the run has any task or part for this lesson, i.e. the user chose it. */
@@ -199,14 +202,16 @@ export function assembleLessons(run: LessonsRun, topics: LessonTopic[], parts: L
       const complete = rows.length > 0 && rows.every((r) => r.part);
       const a = ai.get(ss.id);
       const partsPending = mineTasks.some((t) => t.stage === "lesson");
+      const correcting = mineTasks.filter((t) => t.stage === "lesson" && t.correction);
       out.push({
         subsectionId: ss.id, title: ss.title, scope: ss.scope, sectionId: sec.id, topicIds: mine.map((t) => t.id), parts: rows,
         ai: a ? { verdict: a.verdict, issues: a.issues, round: a.round } : null,
+        fixing: correcting.length ? { round: Math.max(...correcting.map((t) => t.correction!.round)), parts: correcting.length, issues: correcting.flatMap((t) => t.correction!.problems) } : null,
         pending: mineTasks.length,
         inRun: rows.some((r) => r.part) || tasks.some((t) => (t.stage === "review" ? t.targetId === ss.id : ids.has(t.targetId))),
         status: complete && !partsPending
           ? (review.get(ss.id)?.status ?? (a ? (a.verdict === "pass" ? "ai_approved" : "flagged") : "checking"))
-          : partsPending ? "writing" : rows.some((r) => r.part) ? "incomplete" : "not_started",
+          : partsPending ? (complete && correcting.length ? "fixing" : "writing") : rows.some((r) => r.part) ? "incomplete" : "not_started",
       });
     }
   }

@@ -5,6 +5,21 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: "Fixing after AI check" state and visible findings
+- **Why:** with every part written, a lesson that the AI check had sent back for correction still read "Writing", which
+  looked like nothing had happened. It now reads **Fixing after AI check**, and opening the lesson lists what the reviewer
+  found (the part, the problem, the suggested fix), which round it is, and how many parts are being rewritten.
+- The run page's "in progress" count includes lessons being fixed.
+
+### Fix: AI check errors were invisible on the Lessons run page
+- **Symptom:** every part written, the lesson "Awaiting AI check", the run idle and no explanation.
+- **Cause (from the code):** after three failing steps in a row the run loop stops, and the only trace was the small
+  log at the bottom of the page. A failing AI check (for example the audit model not set up or rejecting the request)
+  looks exactly like that. The AI check had never been run against a model before.
+- **Fix:** the page now shows a "A step is failing and will be retried" box with the latest error for each waiting
+  step, and a "Stopped after repeated errors" message with the error text when the run stops. Pressing Start tries again.
+- **Still unknown:** the actual error in your run. Read the box that now appears after pressing Start.
+
 ### Fix: Lessons status wording and phone layout
 - **Ready message:** it said "N lessons chosen (all parts)" even when every part was written and only the AI check was
   waiting. It now says how many parts are still to write, or "Every part is written; N lessons are waiting for the AI
