@@ -5,6 +5,21 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: DeepSeek prompt caching
+- DeepSeek caches repeated prompt prefixes automatically (no request flag), so caching is about keeping the start of
+  every request identical. The static system prompt already comes first; lesson-writing prompts were reordered so the
+  lesson title, scope and sibling topics (same for every part of a lesson) precede the topic and part number.
+  The AI-check prompt already had its shared lesson context first.
+- Codex: reviewed every stage. Planning prompts now put the subject and curriculum outline (identical for each major
+  section) before the section. Expand, parent, atomic, coverage, solve-blind and review prompts were left as they are:
+  their per-call content (the topic, parent question or question batch) is what differs, and their long fixed
+  instructions already sit in the system prompt at the front, which is the part that gets cached. Retry and
+  correction rounds already append their extra text after the topic, so a retry reuses the first attempt's prefix.
+- `lib/model.ts` logs `[model] prompt cache: N hit, M miss` from DeepSeek's usage report on each call. The Anthropic
+  path is unchanged.
+- Caching is best effort and not instant: DeepSeek builds the cache in the background, so hits show on later calls
+  (typically seconds to minutes later); only the shared prefix is discounted. Not yet verified against a live call.
+
 ### Change: clearer names for the Codex "What to build" choices
 - Topics only (first step) · Parent questions, I approve them · Parent questions, fully automatic · Parent + atomic
   questions, I approve them · Parent + atomic questions, AI-checked. The names appear in the selector, the run header and the

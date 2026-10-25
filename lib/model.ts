@@ -138,7 +138,12 @@ export async function callModel(opts: {
         message?: { content?: string | Array<{ type: string; text?: string }> | null; reasoning_content?: string | null };
       }>;
       error?: unknown;
+      usage?: { prompt_cache_hit_tokens?: number; prompt_cache_miss_tokens?: number };
     };
+    // DeepSeek caches repeated prompt prefixes automatically (no request flag) and reports hits and misses here.
+    if (data.usage?.prompt_cache_hit_tokens !== undefined) {
+      console.log(`[model] prompt cache: ${data.usage.prompt_cache_hit_tokens} hit, ${data.usage.prompt_cache_miss_tokens ?? 0} miss`);
+    }
     const choice       = data.choices?.[0];
     const msg          = choice?.message;
     const finishReason = choice?.finish_reason;
