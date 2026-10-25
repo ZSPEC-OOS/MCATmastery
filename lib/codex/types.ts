@@ -14,6 +14,9 @@ const DEPTH_RANK: Record<CodexDepth, number> = { topics: 0, parents: 1, atomics:
 export const depthAtLeast = (d: CodexDepth, min: CodexDepth) => DEPTH_RANK[d] >= DEPTH_RANK[min];
 
 export type CodexStage = "plan" | "expand" | "parent" | "atomic" | "verify";
+const CODEX_STAGES: readonly string[] = ["plan", "expand", "parent", "atomic", "verify"];
+/** Older runs can hold tasks from stages Codex no longer has (e.g. "content"); those are ignored everywhere. */
+export const isCodexStage = (s: string): s is CodexStage => CODEX_STAGES.includes(s);
 export type TaskStatus = "queued" | "running" | "done" | "failed";
 
 /** Question lifecycle. Only a person can move a question to "approved". */

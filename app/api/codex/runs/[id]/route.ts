@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { bankBlockers, getProgress } from "../../../../../lib/codex/engine";
+import { isCodexStage } from "../../../../../lib/codex/types";
 import { errorResponse, getDeps, isDenied, requireCodexUser } from "../../../../../lib/codex/runtime";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -15,7 +16,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       run: { ...run, sourceText: undefined },
       topics: topics.sort((a, b) => a.number - b.number),
       questions: questions.filter((q) => q.current),
-      failedTasks: tasks.filter((t) => t.status === "failed").map((t) => ({ id: t.id, stage: t.stage, targetId: t.targetId, error: t.error })),
+      failedTasks: tasks.filter((t) => t.status === "failed" && isCodexStage(t.stage)).map((t) => ({ id: t.id, stage: t.stage, targetId: t.targetId, error: t.error })),
       progress,
       bankBlockers: bankBlockers(run, progress),
     });

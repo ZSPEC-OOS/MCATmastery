@@ -5,6 +5,13 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Repair: Codex runs stopped loading after lessons were removed
+- **Symptom:** the Codex runs list and older runs would not load.
+- **Cause:** runs on which lessons had been developed still held tasks with the stage `content`. After lessons
+  moved out of Codex, the progress calculation hit an unknown stage and threw, so the list and run pages failed.
+- **Fix:** Codex now ignores any task whose stage it does not know (progress, claiming, failed-task list and
+  retry). The orphaned tasks stay in Firestore, harmless. Nothing is deleted.
+
 ### Change: lessons moved out of Codex into a new app, MCAT Lessons
 - **Codex cleanup:** the reading-lesson work added earlier today (the "Topics only + content" run type, Develop
   content, the Lessons toolbar and progress bar, Choose lessons, View content, `codex_content`) is removed from
