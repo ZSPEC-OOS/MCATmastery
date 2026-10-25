@@ -5,6 +5,11 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: Add to run / Rewrite on each lesson row
+- The **Add to run** (lesson not in the run) and **Rewrite** (finished lesson; asks first, clears its AI check and any
+  decision) buttons now sit on the collapsed lesson row, so several lessons can be queued without opening each one.
+  They only queue; press Start or Resume to write. On a phone the "N parts" count is hidden to make room.
+
 ### Change: simpler Advanced section on the Lessons run page; one Download button
 - **Removed** the Add lessons and Read lessons buttons (and their pages). Reading now happens in **Study**.
 - **Advanced** now holds **Confirm all AI-approved** and a single **Download** button. Clicking Download opens a small
