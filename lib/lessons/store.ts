@@ -2,7 +2,7 @@
 // touch Mastery's question bank or the Codex collections. Firebase is initialised by Mastery's own
 // FIREBASE_SERVICE_ACCOUNT variable.
 
-import type { LessonDoc, LessonStage, LessonTask, LessonTopic, LessonsRun, RunSection } from "./types";
+import type { LessonPart, LessonReview, LessonStage, LessonTask, LessonTopic, LessonsRun, RunSection } from "./types";
 import { docId, isLessonStage } from "./types";
 
 export interface LessonsStore {
@@ -26,9 +26,11 @@ export interface LessonsStore {
   getTopic(runId: string, id: string): Promise<LessonTopic | null>;
   updateTopic(runId: string, id: string, patch: Partial<LessonTopic>): Promise<void>;
 
-  putLesson(l: LessonDoc): Promise<void>;
-  listLessons(runId: string): Promise<LessonDoc[]>;
-  updateLesson(runId: string, topicId: string, patch: Partial<LessonDoc>): Promise<void>;
+  putPart(p: LessonPart): Promise<void>;
+  listParts(runId: string): Promise<LessonPart[]>;
+  listReviews(runId: string): Promise<LessonReview[]>;
+  setReview(r: LessonReview): Promise<void>;
+  deleteReview(runId: string, subsectionId: string): Promise<void>;
 }
 
 export function pickClaimable(tasks: LessonTask[], now: Date, skipStages: LessonStage[] = []): LessonTask[] {
@@ -45,7 +47,7 @@ export function pickClaimable(tasks: LessonTask[], now: Date, skipStages: Lesson
 
 // ── Firestore ───────────────────────────────────────────────────────────────
 
-const C = { runs: "lessons_runs", tasks: "lessons_tasks", topics: "lessons_topics", lessons: "lessons_items" } as const;
+const C = { runs: "lessons_runs", tasks: "lessons_tasks", topics: "lessons_topics", parts: "lessons_parts", reviews: "lessons_reviews" } as const;
 
 /** Firestore rejects `undefined` field values; this strips them from nested data. */
 function clean<T>(v: T): T {
@@ -85,7 +87,7 @@ export function createFirestoreStore(): LessonsStore {
       });
     },
     async deleteRun(id) {
-      for (const name of [C.tasks, C.topics, C.lessons]) {
+      for (const name of [C.tasks, C.topics, C.parts, C.reviews]) {
         const snap = await col(name).where("runId", "==", id).get();
         for (let i = 0; i < snap.docs.length; i += 400) {
           const batch = fsdb().batch();
@@ -147,9 +149,11 @@ export function createFirestoreStore(): LessonsStore {
     async getTopic(runId, id) { const d = await col(C.topics).doc(docId(runId, id)).get(); return d.exists ? (d.data() as LessonTopic) : null; },
     async updateTopic(runId, id, patch) { await col(C.topics).doc(docId(runId, id)).update(clean(patch)); },
 
-    async putLesson(l) { await col(C.lessons).doc(l.id).set(clean(l)); },
-    async listLessons(runId) { return byRun<LessonDoc>(C.lessons, runId); },
-    async updateLesson(runId, topicId, patch) { await col(C.lessons).doc(docId(runId, topicId)).update(clean(patch)); },
+    async putPart(p) { await col(C.parts).doc(p.id).set(clean(p)); },
+    async listParts(runId) { return byRun<LessonPart>(C.parts, runId); },
+    async listReviews(runId) { return byRun<LessonReview>(C.reviews, runId); },
+    async setReview(r) { await col(C.reviews).doc(r.id).set(clean(r)); },
+    async deleteReview(runId, subsectionId) { await col(C.reviews).doc(docId(runId, subsectionId)).delete(); },
   };
 }
 

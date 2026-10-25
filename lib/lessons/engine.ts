@@ -1,6 +1,7 @@
 // MCAT Lessons pipeline engine.
 //
-//   Topic database (planned and split once, in Codex) → one reading lesson per topic → human review.
+//   Topic database (planned and split once, in Codex) → one lesson per subsection (MS-1-SS-2), written as one part per
+//   split topic → human review of each whole lesson.
 //   Lessons only: no questions are ever written, and nothing here plans or splits a section.
 //
 // There is no background worker: every unit of work is a persisted task, and `advance()` runs exactly one task
@@ -16,7 +17,8 @@ import type { TopicBank } from "../topicbank";
 import { checkLesson } from "./checks";
 import { renderLessonPrompt } from "./prompts";
 import { MAX_REPAIR_ROUNDS, MAX_TASK_ATTEMPTS, autoLessonsOn, docId, isCarsSubject, isLessonStage } from "./types";
-import type { Finding, LessonDoc, LessonStage, LessonTask, LessonTopic, LessonsRun } from "./types";
+import { assembleLessons } from "./types";
+import type { Finding, LessonPart, LessonStage, LessonTask, LessonTopic, LessonsRun } from "./types";
 
 export interface Deps {
   store: LessonsStore;
@@ -94,29 +96,33 @@ function newTask(runId: string, targetId: string, now: string): LessonTask {
 // ── Progress ────────────────────────────────────────────────────────────────
 
 export interface Progress {
-  tasks: Record<LessonStage, { queued: number; running: number; done: number; failed: number }>;
+  tasks: Record<LessonStage, { queued: number; running: number; done: number; failed: number }>;   // one task per part (split topic)
   active: boolean;       // work remains that advance() can do now or later (queued/running)
   failed: number;
   topics: number;
-  lessons: { written: number; draft: number; approved: number; rejected: number };
+  /** Lessons are subsections; a lesson is "written" once every one of its parts exists. */
+  lessons: { total: number; written: number; draft: number; approved: number; rejected: number; parts: number };
 }
 
 export async function getProgress(store: LessonsStore, runId: string): Promise<Progress> {
-  const [allTasks, topics, lessons, run] = await Promise.all([store.listTasks(runId), store.listTopics(runId), store.listLessons(runId), store.getRun(runId)]);
+  const [allTasks, topics, parts, reviews, run] = await Promise.all([store.listTasks(runId), store.listTopics(runId), store.listParts(runId), store.listReviews(runId), store.getRun(runId)]);
   const tasks = allTasks.filter((t) => isLessonStage(t.stage));
   const held = (t: LessonTask) => run?.lessonsPaused === true && t.status === "queued"; // paused lessons are not work "to do now"
   const byStage: Progress["tasks"] = { lesson: { queued: 0, running: 0, done: 0, failed: 0 } };
   for (const t of tasks) byStage[t.stage][t.status]++;
+  const lessons = run ? assembleLessons(run, topics, parts, reviews) : [];
   return {
     tasks: byStage,
     active: tasks.some((t) => (t.status === "queued" || t.status === "running") && !held(t)),
     failed: tasks.filter((t) => t.status === "failed").length,
     topics: topics.length,
     lessons: {
-      written: lessons.length,
+      total: lessons.length,
+      written: lessons.filter((l) => l.status !== "writing").length,
       draft: lessons.filter((l) => l.status === "draft").length,
       approved: lessons.filter((l) => l.status === "approved").length,
       rejected: lessons.filter((l) => l.status === "rejected").length,
+      parts: parts.length,
     },
   };
 }
@@ -145,7 +151,7 @@ export async function advance(deps: Deps, runId: string): Promise<AdvanceResult>
   if (!task) return { ran: null, progress: await getProgress(store, runId) };
 
   try {
-    await runLesson(deps, run, task);
+    await runPart(deps, run, task);
     await store.updateTask(runId, task.id, { status: "done", error: undefined, leaseUntil: undefined, updatedAt: iso(nowOf(deps)) });
     return { ran: { id: task.id, stage: task.stage, targetId: task.targetId, outcome: "done" }, progress: await getProgress(store, runId) };
   } catch (e) {
@@ -196,13 +202,17 @@ async function generateValidated<T>(
   throw new ContentFailure(`Validation still failing after ${MAX_REPAIR_ROUNDS} repair rounds: ${last.slice(0, 3).map((f) => f.message).join(" | ")}`, last);
 }
 
-// ── Reading lessons ─────────────────────────────────────────────────────────
+// ── Lesson parts ────────────────────────────────────────────────────────────
 
-async function runLesson(deps: Deps, run: LessonsRun, task: LessonTask) {
-  const topic = (await deps.store.listTopics(run.id)).find((t) => t.id === task.targetId);
+/** Writes one part (one split topic) of its subsection's lesson. */
+async function runPart(deps: Deps, run: LessonsRun, task: LessonTask) {
+  const topics = await deps.store.listTopics(run.id);
+  const topic = topics.find((t) => t.id === task.targetId);
   if (!topic) throw new ContentFailure(`Unknown topic ${task.targetId}`, []);
   const section = run.sections.find((s) => s.id === topic.sectionId)!;
-  const siblingTitles = (await deps.store.listTopics(run.id)).filter((t) => t.subsectionId === topic.subsectionId && t.id !== topic.id).map((t) => t.title);
+  const subsection = section.subsections.find((s) => s.id === topic.subsectionId);
+  const inLesson = topics.filter((t) => t.subsectionId === topic.subsectionId).sort((a, b) => a.number - b.number);
+  const siblingTitles = inLesson.filter((t) => t.id !== topic.id).map((t) => t.title);
 
   const { value, warnings, model } = await generateValidated(deps, {
     maxTokens: 8000,
@@ -212,45 +222,49 @@ async function runLesson(deps: Deps, run: LessonsRun, task: LessonTask) {
         subject: run.subject,
         topic: { id: topic.id, title: topic.title, majorSection: section.title, subsection: topic.subsectionTitle, scope: topic.scope, primaryLearningTarget: topic.primaryLearningTarget },
         siblingTitles,
+        lesson: { title: `${topic.subsectionId} · ${subsection?.title ?? topic.subsectionTitle}`, scope: subsection?.scope ?? "", part: inLesson.findIndex((t) => t.id === topic.id) + 1, of: inLesson.length },
         ...(repair ? { repair } : {}),
       }),
     validate: (json) => checkLesson(json),
   });
 
-  await deps.store.putLesson({
-    id: docId(run.id, topic.id), runId: run.id, topicId: topic.id, status: "draft",
+  await deps.store.putPart({
+    id: docId(run.id, topic.id), runId: run.id, topicId: topic.id, subsectionId: topic.subsectionId,
     content: value, findings: warnings, model, createdAt: iso(nowOf(deps)),
   });
+  // A part that changes after the lesson was reviewed puts the whole lesson back to "awaiting review".
+  await deps.store.deleteReview(run.id, topic.subsectionId);
 }
 
 // ── Lesson controls ─────────────────────────────────────────────────────────
 
 /**
- * Without topicIds: switch automatic lessons on and queue one for every topic that has no lesson task yet.
- * With topicIds: queue just those, rewriting any that already have a lesson, and leave the automatic setting alone.
+ * Without subsectionIds: switch automatic lessons on and queue every part that has no task yet.
+ * With subsectionIds: queue every part of just those lessons, rewriting parts that already exist, and leave the
+ * automatic setting alone.
  */
 export async function startLessons(
-  store: LessonsStore, runId: string, now: Date, topicIds?: string[],
+  store: LessonsStore, runId: string, now: Date, subsectionIds?: string[],
 ): Promise<{ ok: true; queued: number } | { ok: false; error: string }> {
   const run = await store.getRun(runId);
   if (!run) return { ok: false, error: "Run not found" };
   const [topics, tasks] = await Promise.all([store.listTopics(runId), store.listTasks(runId)]);
-  const lessonTasks = new Map(tasks.filter((t) => isLessonStage(t.stage)).map((t) => [t.targetId, t]));
+  const partTasks = new Map(tasks.filter((t) => isLessonStage(t.stage)).map((t) => [t.targetId, t]));
 
   let ready: LessonTopic[];
-  if (topicIds) {
-    const want = new Set(topicIds);
-    ready = topics.filter((t) => want.has(t.id) && !["queued", "running"].includes(lessonTasks.get(t.id)?.status ?? ""));
+  if (subsectionIds) {
+    const want = new Set(subsectionIds);
+    ready = topics.filter((t) => want.has(t.subsectionId) && !["queued", "running"].includes(partTasks.get(t.id)?.status ?? ""));
   } else {
     await store.updateRun(runId, { autoLessons: true });
-    ready = topics.filter((t) => !lessonTasks.has(t.id));
+    ready = topics.filter((t) => !partTasks.has(t.id));
   }
   await store.updateRun(runId, { lessonsPaused: false });
   await store.putTasks(ready.map((t) => newTask(runId, t.id, iso(now))));
   return { ok: true, queued: ready.length };
 }
 
-/** Pause holds lessons; resume releases them; stop drops every lesson not yet started and turns automatic lessons off. */
+/** Pause holds lessons; resume releases them; stop drops every part not yet started and turns automatic lessons off. */
 export async function controlLessons(store: LessonsStore, runId: string, action: "pause" | "resume" | "stop"): Promise<{ ok: true; dropped?: number } | { ok: false; error: string }> {
   const run = await store.getRun(runId);
   if (!run) return { ok: false, error: "Run not found" };
@@ -266,40 +280,44 @@ export async function controlLessons(store: LessonsStore, runId: string, action:
 
 export type Decision = "approve" | "reject";
 
-export async function decideLesson(store: LessonsStore, runId: string, topicId: string, decision: Decision, now: Date): Promise<{ ok: true } | { ok: false; error: string }> {
-  const l = (await store.listLessons(runId)).find((x) => x.topicId === topicId);
-  if (!l) return { ok: false, error: "Lesson not found" };
-  await store.updateLesson(runId, topicId, { status: decision === "approve" ? "approved" : "rejected", decidedAt: iso(now) });
+async function lessonsOf(store: LessonsStore, run: LessonsRun) {
+  const [topics, parts, reviews] = await Promise.all([store.listTopics(run.id), store.listParts(run.id), store.listReviews(run.id)]);
+  return assembleLessons(run, topics, parts, reviews);
+}
+
+/** Decides a whole lesson (subsection). Only a lesson whose every part has been written can be decided. */
+export async function decideLesson(store: LessonsStore, runId: string, subsectionId: string, decision: Decision, now: Date): Promise<{ ok: true } | { ok: false; error: string }> {
+  const run = await store.getRun(runId);
+  if (!run) return { ok: false, error: "Run not found" };
+  const lesson = (await lessonsOf(store, run)).find((l) => l.subsectionId === subsectionId);
+  if (!lesson) return { ok: false, error: "Lesson not found" };
+  if (lesson.status === "writing") return { ok: false, error: "This lesson is still being written; decide it once every part exists." };
+  await store.setReview({ id: docId(runId, subsectionId), runId, subsectionId, status: decision === "approve" ? "approved" : "rejected", decidedAt: iso(now) });
   return { ok: true };
 }
 
 export async function approveAllLessons(store: LessonsStore, runId: string, now: Date): Promise<number> {
-  const drafts = (await store.listLessons(runId)).filter((l) => l.status === "draft");
-  for (const l of drafts) await decideLesson(store, runId, l.topicId, "approve", now);
+  const run = await store.getRun(runId);
+  if (!run) return 0;
+  const drafts = (await lessonsOf(store, run)).filter((l) => l.status === "draft");
+  for (const l of drafts) await decideLesson(store, runId, l.subsectionId, "approve", now);
   return drafts.length;
 }
 
 // ── Export ──────────────────────────────────────────────────────────────────
 
-export function buildExport(run: LessonsRun, topics: LessonTopic[], lessons: LessonDoc[], opts: { approvedOnly: boolean; now: Date }) {
-  const keep = lessons.filter((l) => l.status !== "rejected" && (!opts.approvedOnly || l.status === "approved"));
-  const byNum = (a: { number: number }, b: { number: number }) => a.number - b.number;
+export function buildExport(run: LessonsRun, topics: LessonTopic[], parts: LessonPart[], reviews: import("./types").LessonReview[], opts: { approvedOnly: boolean; now: Date }) {
+  const lessons = assembleLessons(run, topics, parts, reviews).filter((l) => l.status !== "rejected" && l.status !== "writing" && (!opts.approvedOnly || l.status === "approved"));
   return {
     schema: "mcat-lessons.export",
-    schemaVersion: "1.0.0",
+    schemaVersion: "2.0.0",
     exportedAt: opts.now.toISOString(),
     approvedOnly: opts.approvedOnly,
     run: { id: run.id, subject: run.subject, createdAt: run.createdAt },
-    counts: { topics: topics.length, lessons: keep.length },
-    majorSections: run.sections.filter((s) => s.selected).map((s) => ({
-      id: s.id, title: s.title, coverageSummary: s.coverageSummary, declaredGaps: s.declaredGaps,
-      subsections: s.subsections.map((ss) => ({
-        id: ss.id, title: ss.title, scope: ss.scope,
-        topics: topics.filter((t) => t.subsectionId === ss.id).sort(byNum).map((t) => {
-          const l = keep.find((x) => x.topicId === t.id);
-          return { id: t.id, title: t.title, scope: t.scope, primaryLearningTarget: t.primaryLearningTarget, lesson: l ? { status: l.status, ...l.content, findings: l.findings, model: l.model } : null };
-        }),
-      })),
+    counts: { lessons: lessons.length, parts: lessons.reduce((n, l) => n + l.parts.length, 0) },
+    lessons: lessons.map((l) => ({
+      id: l.subsectionId, title: `${l.subsectionId} · ${l.title}`, scope: l.scope, majorSection: l.sectionId, status: l.status,
+      parts: l.parts.map(({ topic, part }) => ({ id: topic.id, topic: topic.title, scope: topic.scope, primaryLearningTarget: topic.primaryLearningTarget, ...(part ? { ...part.content, findings: part.findings, model: part.model } : {}) })),
     })),
   };
 }

@@ -6,13 +6,12 @@ import useSWR from "swr";
 import LessonsNavbar from "../_components/LessonsNavbar";
 import LessonCard from "../_components/LessonCard";
 import { ACCENT, btn, card, fetcher, input } from "../_components/ui";
-import type { LessonDoc, LessonTopic, LessonsRun } from "../../../lib/lessons/types";
+import type { Lesson, LessonsRun } from "../../../lib/lessons/types";
 import type { Progress } from "../../../lib/lessons/engine";
 
 interface Detail {
   run: Omit<LessonsRun, "sourceText">;
-  topics: LessonTopic[];
-  lessons: LessonDoc[];
+  lessons: Lesson[];
   failedTasks: { id: string; stage: string; targetId: string; error?: string }[];
   progress: Progress;
 }
@@ -25,7 +24,6 @@ export default function RunPage() {
   const [running, setRunning] = useState(false);
   const [concurrency, setConcurrency] = useState(2);
   const [log, setLog] = useState<string[]>([]);
-  const [openTopic, setOpenTopic] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const live = useRef(false);
   const lastMutate = useRef(0);
@@ -66,7 +64,7 @@ export default function RunPage() {
 
   const pause = () => { live.current = false; };
 
-  // The topic-chooser page sends you here with ?autostart=1 after queuing topics.
+  // The lesson-chooser page sends you here with ?autostart=1 after queuing lessons.
   const autoStarted = useRef(false);
   useEffect(() => {
     if (autoStarted.current || !data || typeof window === "undefined") return;
@@ -76,8 +74,8 @@ export default function RunPage() {
     if (data.progress.active) start();
   }, [data, start]);
 
-  async function decide(c: LessonDoc, action: "approve" | "reject") {
-    const res = await fetch(`/api/lessons/runs/${runId}/lessons`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, topicId: c.topicId }) });
+  async function decide(l: Lesson, action: "approve" | "reject") {
+    const res = await fetch(`/api/lessons/runs/${runId}/lessons`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, subsectionId: l.subsectionId }) });
     if (!res.ok) setNotice((await res.json()).error ?? "Could not record the decision");
     mutate();
   }
@@ -106,8 +104,7 @@ export default function RunPage() {
   if (error) return <Shell><p style={{ color: "var(--accent-red)" }}>{error.message}</p></Shell>;
   if (!data) return <Shell><p style={{ color: "var(--text-muted)" }}>Loading…</p></Shell>;
 
-  const { run, topics, lessons, progress, failedTasks } = data;
-  const lessonOf = (tid: string) => lessons.find((l) => l.topicId === tid);
+  const { run, lessons, progress, failedTasks } = data;
   const unfinished = progress.active;
   const lt = progress.tasks.lesson;
   const lessonsPending = lt.queued + lt.running;
@@ -121,7 +118,7 @@ export default function RunPage() {
         <div>
           <Link href="/lessons" className="text-xs" style={{ color: "var(--text-muted)" }}>← All runs</Link>
           <h1 className="text-2xl" style={{ color: "var(--text-primary)" }}>{run.subject}</h1>
-          <p className="text-xs" style={{ color: "var(--text-muted)" }}>Reading lessons · started {new Date(run.createdAt).toLocaleString()}</p>
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>Reading lessons, one per subsection · started {new Date(run.createdAt).toLocaleString()}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="text-xs" style={{ color: "var(--text-muted)" }}>Parallel
@@ -144,7 +141,7 @@ export default function RunPage() {
 
       <section className="mb-4">
         <div className="p-3" style={card}>
-          <div className="flex justify-between text-xs" style={{ color: "var(--text-muted)" }}><span>Lessons</span><span>{lt.done}/{lessonTotal}</span></div>
+          <div className="flex justify-between text-xs" style={{ color: "var(--text-muted)" }}><span>Lessons: {progress.lessons.written}/{progress.lessons.total} complete · parts written</span><span>{lt.done}/{lessonTotal}</span></div>
           <div className="h-1.5 rounded-full mt-2" style={{ background: "var(--bg-input)" }}><div className="h-1.5 rounded-full" style={{ width: `${lessonPct}%`, background: ACCENT }} /></div>
           {lt.failed > 0 && <p className="text-xs mt-1" style={{ color: "var(--accent-red)" }}>{lt.failed} failed</p>}
         </div>
@@ -153,11 +150,11 @@ export default function RunPage() {
       <section className="p-3 mb-4 flex flex-wrap items-center gap-2" style={card} aria-label="Lessons toolbar">
         <span className="text-sm font-semibold mr-1" style={{ color: "var(--text-primary)" }}>Lessons</span>
         <span className="text-xs mr-2" style={{ color: "var(--text-muted)" }}>
-          {progress.lessons.written} written · {progress.lessons.approved} approved · {progress.lessons.draft} awaiting you
-          {lessonsPending > 0 ? ` · ${lessonsPending} left` : ""}{run.lessonsPaused ? " · paused" : ""}{!autoOn ? " · automatic lessons off" : ""}
+          {progress.lessons.written}/{progress.lessons.total} lessons written · {progress.lessons.approved} approved · {progress.lessons.draft} awaiting you
+          {lessonsPending > 0 ? ` · ${lessonsPending} part(s) left` : ""}{run.lessonsPaused ? " · paused" : ""}{!autoOn ? " · automatic lessons off" : ""}
         </span>
         <span className="flex-1" />
-        {topics.length > 0 && (!autoOn || (lessonsPending === 0 && !run.lessonsPaused)) && <button style={btn("primary")} onClick={() => lessonAction("start")}>Develop lessons</button>}
+        {lessons.length > 0 && (!autoOn || (lessonsPending === 0 && !run.lessonsPaused)) && <button style={btn("primary")} onClick={() => lessonAction("start")}>Develop lessons</button>}
         {!run.lessonsPaused && lessonsPending > 0 && <button style={btn("ghost")} onClick={() => lessonAction("pause")}>Pause lessons</button>}
         {run.lessonsPaused && <button style={btn("primary")} onClick={() => lessonAction("resume")}>Resume lessons</button>}
         {lt.queued > 0 && <button style={btn("danger")} onClick={() => lessonAction("stop")}>Stop</button>}
@@ -189,35 +186,9 @@ export default function RunPage() {
             {s.declaredGaps && s.declaredGaps.length > 0 && (
               <p className="text-xs mb-2" style={{ color: "#d97706" }}>Gaps declared by the planner: {s.declaredGaps.map((g) => g.description).join("; ")}</p>
             )}
-            {s.subsections.map((ss) => (
-              <div key={ss.id} className="mb-4">
-                <h3 className="text-sm font-semibold mb-1.5" style={{ color: "var(--text-secondary)", fontFamily: "var(--font-roboto), system-ui, sans-serif" }}>{ss.id} · {ss.title}</h3>
-                <div className="space-y-1.5">
-                  {topics.filter((t) => t.subsectionId === ss.id).map((t) => {
-                    const lesson = lessonOf(t.id);
-                    const open = openTopic === t.id;
-                    return (
-                      <div key={t.id} style={card}>
-                        <button className="w-full text-left p-3 flex items-center gap-2" onClick={() => setOpenTopic(open ? null : t.id)}>
-                          <span className="text-xs font-mono" style={{ color: "var(--text-muted)", minWidth: 96 }}>{t.id}</span>
-                          <span className="flex-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-                            {t.groupTitle && <span className="block text-xs font-normal" style={{ color: "var(--text-muted)" }}>{t.groupTitle}</span>}
-                            {t.title}
-                          </span>
-                          <span className="text-xs" style={{ color: "var(--text-muted)" }}>{lesson ? `lesson ${lesson.status}` : "no lesson yet"}</span>
-                        </button>
-                        {open && (
-                          <div className="px-3 pb-3 space-y-2">
-                            <p className="text-xs" style={{ color: "var(--text-muted)" }}><b>Scope:</b> {t.scope} <b>Target:</b> {t.primaryLearningTarget}</p>
-                            {lesson && <LessonCard key={lesson.id} c={lesson} onDecide={decide} />}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
+            <div className="space-y-1.5">
+              {lessons.filter((l) => l.sectionId === s.id).map((l) => <LessonCard key={l.subsectionId} lesson={l} onDecide={decide} />)}
+            </div>
           </section>
         ))}
       </div>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProgress } from "../../../../../lib/lessons/engine";
-import { isLessonStage } from "../../../../../lib/lessons/types";
+import { assembleLessons, isLessonStage } from "../../../../../lib/lessons/types";
 import { errorResponse, getDeps, isDenied, requireLessonsUser } from "../../../../../lib/lessons/runtime";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -11,11 +11,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const { store } = getDeps();
     const run = await store.getRun(id);
     if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
-    const [topics, tasks, lessons, progress] = await Promise.all([store.listTopics(id), store.listTasks(id), store.listLessons(id), getProgress(store, id)]);
+    const [topics, tasks, parts, reviews, progress] = await Promise.all([store.listTopics(id), store.listTasks(id), store.listParts(id), store.listReviews(id), getProgress(store, id)]);
     return NextResponse.json({
       run: { ...run, sourceText: undefined },
       topics: topics.sort((a, b) => a.number - b.number),
-      lessons,
+      lessons: assembleLessons(run, topics, parts, reviews),
       failedTasks: tasks.filter((t) => t.status === "failed" && isLessonStage(t.stage)).map((t) => ({ id: t.id, stage: t.stage, targetId: t.targetId, error: t.error })),
       progress,
     });

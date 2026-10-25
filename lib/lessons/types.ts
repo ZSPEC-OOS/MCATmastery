@@ -81,7 +81,7 @@ export interface Finding {
   message: string;
 }
 
-/** A reading lesson for one split topic. No questions: this is learning material. */
+/** One part of a lesson: the reading material for a single split topic. No questions: this is learning material. */
 export interface LessonContent {
   title: string;
   objectives: string[];
@@ -95,14 +95,57 @@ export interface LessonContent {
   sourceBasis: string;
 }
 
-export interface LessonDoc {
+/**
+ * A lesson is one subsection (MS-1-SS-2) and is made of one part per split topic. Parts are stored one document each
+ * so parallel workers never overwrite one another; the lesson is assembled from them when read.
+ */
+export interface LessonPart {
   id: string;               // `${runId}__${topicId}` (document id)
   runId: string;
   topicId: string;
-  status: "draft" | "approved" | "rejected";
+  subsectionId: string;
   content: LessonContent;
   findings: Finding[];
   model?: string;
   createdAt: string;
-  decidedAt?: string;
+}
+
+/** The human decision on a whole lesson (subsection). No document = awaiting review. */
+export interface LessonReview {
+  id: string;               // `${runId}__${subsectionId}` (document id)
+  runId: string;
+  subsectionId: string;
+  status: "approved" | "rejected";
+  decidedAt: string;
+}
+
+export type LessonStatus = "writing" | "draft" | "approved" | "rejected";
+
+/** A lesson as the pages show it, assembled from its parts. */
+export interface Lesson {
+  subsectionId: string;
+  title: string;            // the subsection title; the lesson is titled "MS-1-SS-2 · <title>"
+  scope: string;
+  sectionId: string;
+  topicIds: string[];       // every part the lesson will have, in order
+  parts: { topic: LessonTopic; part: LessonPart | null }[];
+  status: LessonStatus;     // "writing" until every part exists
+}
+
+export function assembleLessons(run: LessonsRun, topics: LessonTopic[], parts: LessonPart[], reviews: LessonReview[]): Lesson[] {
+  const byTopic = new Map(parts.map((p) => [p.topicId, p]));
+  const review = new Map(reviews.map((r) => [r.subsectionId, r]));
+  const out: Lesson[] = [];
+  for (const sec of run.sections.filter((x) => x.selected)) {
+    for (const ss of sec.subsections) {
+      const mine = topics.filter((t) => t.subsectionId === ss.id).sort((a, b) => a.number - b.number);
+      const rows = mine.map((topic) => ({ topic, part: byTopic.get(topic.id) ?? null }));
+      const complete = rows.length > 0 && rows.every((r) => r.part);
+      out.push({
+        subsectionId: ss.id, title: ss.title, scope: ss.scope, sectionId: sec.id, topicIds: mine.map((t) => t.id), parts: rows,
+        status: !complete ? "writing" : (review.get(ss.id)?.status ?? "draft"),
+      });
+    }
+  }
+  return out;
 }
