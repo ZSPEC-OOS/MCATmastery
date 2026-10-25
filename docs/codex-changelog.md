@@ -5,6 +5,26 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: Lessons reorganized: one control bar, nothing auto-starts, AI validation layer
+- **No auto start.** Creating a run only queues the lessons you ticked (everything is ticked by default, with Select
+  all / Clear). The "write automatically" checkbox is gone. Nothing is written until you press Start.
+- **One control bar on the run page:** **Start** (Resume after a pause or stop), **Pause**, **Stop**, plus Parallel.
+  Pause holds everything after the step in flight. Stop drops everything still queued (written parts are kept). One
+  status sentence (Ready / Running / Paused / Stopped / Finished) replaces the overlapping counters, and one progress
+  bar shows parts written. The old Develop lessons, Pause lessons and separate Run buttons are removed.
+- **Add lessons** (was Choose lessons) queues more lessons, or rewrites ones already written, and returns to the run
+  page without starting.
+- **AI validation layer.** When every part of a lesson is written, an AI reviewer (the audit model) checks the whole
+  lesson in batches of 6 parts for scientific accuracy, scope, contradictions between parts, invented claims and quiz
+  questions. Parts with errors are rewritten using the reviewer's findings (up to 2 correction rounds), then the
+  lesson is checked again. Result: **AI approved**, or **Flagged for you** if errors remain. A lesson shows the AI
+  verdict, its issues and how many rounds it took; parts show "rewritten N× after the AI check".
+- **Human decision is optional** and overrides the AI either way. "Confirm all AI-approved" confirms in one click.
+- **Database checklist:** a lesson counts as approved when a person approved it, or the AI passed it and no person
+  rejected it. New collection `lessons_aireviews`; tasks gained a `review` stage.
+- **Untested:** written without installed dependencies, so no type-check or run. The reviewer prompt has never
+  been run against a model: check a few lessons by hand before trusting AI approval.
+
 ### Fix: unselected lessons showed "Writing"
 - **Symptom:** after choosing individual lessons, every lesson on the run page said "Writing", which looked as if all of
   them were being written.

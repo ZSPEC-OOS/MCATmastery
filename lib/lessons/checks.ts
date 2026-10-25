@@ -1,9 +1,8 @@
-// Deterministic validation of a generated lesson. Nothing is stored unless these checks pass; errors go back to
-// the model for a bounded number of repair rounds, warnings are kept on the lesson for the reviewer.
-// Plan and split validation is shared with Codex (checkPlan, checkExpansion in ../codex/checks).
+// Deterministic validation of generated lesson parts, and of the AI reviewer's reply. Nothing is stored unless these
+// checks pass; errors go back to the model for a bounded number of repair rounds, warnings are kept for the person.
 
 import { z } from "zod";
-import type { Finding, LessonContent } from "./types";
+import type { Finding, LessonContent, ReviewIssue } from "./types";
 
 const text = (max: number) => z.string().trim().min(1).max(max);
 const words = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
@@ -50,4 +49,32 @@ export function checkLesson(raw: unknown): Parsed<LessonContent> {
   if (!l.whyItMatters) findings.push(warn("NO_WHY", "No explanation of why the idea matters."));
   const blocking = findings.some((f) => f.severity === "error");
   return { ok: !blocking, value: blocking ? undefined : l, findings };
+}
+
+// ── AI review of a whole lesson ─────────────────────────────────────────────
+
+const ReviewSchema = z.object({
+  verdict: z.enum(["pass", "fail"]).catch("fail"),
+  issues: z.array(z.object({
+    partId: z.string().trim().optional().nullable(),
+    severity: z.enum(["error", "warning"]).catch("warning"),
+    message: text(1500),
+    suggestedFix: z.string().trim().max(1500).optional().nullable(),
+  })).max(60).default([]),
+});
+
+/** Validates the reviewer's reply. An error issue always means "fail"; a "fail" with no error issue still fails. */
+export function checkLessonReview(raw: unknown, partIds: string[]): Parsed<{ verdict: "pass" | "fail"; issues: ReviewIssue[] }> {
+  const parsed = ReviewSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, findings: parsed.error.issues.slice(0, 8).map((i) => err("SCHEMA", `${i.path.join(".") || "review"}: ${i.message}`)) };
+  }
+  const known = new Set(partIds);
+  const issues: ReviewIssue[] = parsed.data.issues.map((i) => ({
+    ...(i.partId && known.has(i.partId) ? { topicId: i.partId } : {}),
+    severity: i.severity, message: i.message, ...(i.suggestedFix ? { suggestedFix: i.suggestedFix } : {}),
+  }));
+  const failed = parsed.data.verdict === "fail" || issues.some((i) => i.severity === "error");
+  if (failed && !issues.some((i) => i.severity === "error")) issues.push({ severity: "error", message: "The reviewer marked this lesson as failing without naming a specific problem." });
+  return { ok: true, value: { verdict: failed ? "fail" : "pass", issues }, findings: [] };
 }

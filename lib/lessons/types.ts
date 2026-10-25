@@ -1,15 +1,20 @@
 // MCAT Lessons — shared types.
-// Lessons writes one reading lesson per topic of the shared topic database (planned and split once, in Codex).
-// It generates lessons only (no questions) and keeps its own `lessons_*` Firestore collections.
+// Lessons writes one lesson per subsection (MS-1-SS-2) of the shared topic database (planned and split once, in
+// Codex), as one part per split topic. Every finished lesson is then checked by an AI reviewer and corrected where
+// needed before a person looks at it. It generates lessons only (no questions) and keeps its own `lessons_*`
+// Firestore collections.
 
-export type LessonStage = "lesson";
-const LESSON_STAGES: readonly string[] = ["lesson"];
+/** "lesson" writes (or rewrites) one part; "review" is the AI check of a whole finished lesson. */
+export type LessonStage = "lesson" | "review";
+const LESSON_STAGES: readonly string[] = ["lesson", "review"];
 /** Runs made before lessons moved onto the topic database can hold plan/expand tasks; those are ignored everywhere. */
 export const isLessonStage = (s: string): s is LessonStage => LESSON_STAGES.includes(s);
 export type TaskStatus = "queued" | "running" | "done" | "failed";
 
 export const MAX_TASK_ATTEMPTS = 3;
 export const MAX_REPAIR_ROUNDS = 2;
+/** How many times the AI reviewer may send a lesson's parts back for correction before it is flagged for a person. */
+export const MAX_CORRECTION_ROUNDS = 2;
 
 export const docId = (runId: string, ...parts: (string | number)[]) => [runId, ...parts].join("__");
 
@@ -37,13 +42,9 @@ export interface LessonsRun {
   status: "active" | "cancelled";
   createdAt: string;
   createdBy: string;
-  /** Lessons are written automatically for every split topic. Stop turns this off; Develop lessons turns it back on. Unset = on. */
-  autoLessons?: boolean;
-  /** Lessons are held: lesson tasks are not claimed until resumed. */
+  /** Work is held: lesson and review tasks are not claimed until Start. Nothing starts by itself. */
   lessonsPaused?: boolean;
 }
-
-export const autoLessonsOn = (run: Pick<LessonsRun, "autoLessons">) => run.autoLessons !== false;
 
 export interface LessonTopic {
   id: string;               // MS-1-SS-2-15, or MS-1-SS-2-15.2 for a split-off topic (same IDs as the topic database)
@@ -59,26 +60,38 @@ export interface LessonTopic {
   groupTitle?: string;
 }
 
-export interface LessonTask {
-  id: string;
-  runId: string;
-  stage: LessonStage;
-  targetId: string;         // topic id
-  status: TaskStatus;
-  attempts: number;
-  leaseUntil?: string;
-  notBefore?: string;
-  error?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export type Severity = "error" | "warning";
 
 export interface Finding {
   code: string;
   severity: Severity;
   message: string;
+}
+
+/** An AI reviewer's note on a lesson. `topicId` names the part it concerns (absent = the lesson as a whole). */
+export interface ReviewIssue {
+  topicId?: string;
+  severity: Severity;
+  message: string;
+  suggestedFix?: string;
+}
+
+export interface LessonTask {
+  id: string;
+  runId: string;
+  stage: LessonStage;
+  targetId: string;         // topic id (lesson stage) or subsection id (review stage)
+  status: TaskStatus;
+  attempts: number;
+  leaseUntil?: string;
+  notBefore?: string;
+  error?: string;
+  /** Review tasks: how many correction rounds this lesson has already used. */
+  round?: number;
+  /** Set when the AI reviewer sent this part back: what to fix, and the text being replaced. */
+  correction?: { round: number; problems: ReviewIssue[]; previous: unknown };
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** One part of a lesson: the reading material for a single split topic. No questions: this is learning material. */
@@ -107,10 +120,24 @@ export interface LessonPart {
   content: LessonContent;
   findings: Finding[];
   model?: string;
+  /** How many times the AI reviewer sent this part back and it was rewritten. */
+  corrections?: number;
   createdAt: string;
 }
 
-/** The human decision on a whole lesson (subsection). No document = awaiting review. */
+/** The AI reviewer's verdict on a whole lesson. No document = not checked yet. */
+export interface LessonAiReview {
+  id: string;               // `${runId}__${subsectionId}` (document id)
+  runId: string;
+  subsectionId: string;
+  verdict: "pass" | "fail"; // "fail" after the allowed correction rounds = flagged for a person
+  issues: ReviewIssue[];
+  round: number;            // 0 = passed first time; n = passed or stopped after n correction rounds
+  model?: string;
+  at: string;
+}
+
+/** The human decision on a whole lesson (subsection). Optional: it overrides the AI verdict either way. */
 export interface LessonReview {
   id: string;               // `${runId}__${subsectionId}` (document id)
   runId: string;
@@ -120,11 +147,15 @@ export interface LessonReview {
 }
 
 /**
- * not_started: nothing written and nothing queued. writing: parts are queued or running. incomplete: some parts exist
- * but none are queued (stopped, paused-then-stopped or failed). The rest need every part to exist.
+ * not_started: nothing written and nothing queued. writing: parts queued or running. incomplete: some parts exist but
+ * none are queued. checking: every part exists, the AI check has not finished. ai_approved: the AI reviewer passed it
+ * (after corrections if it needed any). flagged: the AI reviewer still found errors after the allowed corrections.
+ * approved / rejected: a person decided.
  */
-export type LessonStatus = "not_started" | "writing" | "incomplete" | "draft" | "approved" | "rejected";
-export const isComplete = (s: LessonStatus) => s === "draft" || s === "approved" || s === "rejected";
+export type LessonStatus = "not_started" | "writing" | "incomplete" | "checking" | "ai_approved" | "flagged" | "approved" | "rejected";
+export const isComplete = (s: LessonStatus) => s === "checking" || s === "ai_approved" || s === "flagged" || s === "approved" || s === "rejected";
+/** Counts as approved for the Database checklist: passed by the AI or approved by a person, and not rejected. */
+export const isApproved = (s: LessonStatus) => s === "ai_approved" || s === "approved";
 
 /** A lesson as the pages show it, assembled from its parts. */
 export interface Lesson {
@@ -135,23 +166,35 @@ export interface Lesson {
   topicIds: string[];       // every part the lesson will have, in order
   parts: { topic: LessonTopic; part: LessonPart | null }[];
   status: LessonStatus;
+  ai: { verdict: "pass" | "fail"; issues: ReviewIssue[]; round: number } | null;
+  /** Part and review tasks queued or running for this lesson. */
+  pending: number;
+  /** True when the run has any task or part for this lesson, i.e. the user chose it. */
+  inRun: boolean;
 }
 
-export function assembleLessons(run: LessonsRun, topics: LessonTopic[], parts: LessonPart[], reviews: LessonReview[], tasks: LessonTask[] = []): Lesson[] {
+export function assembleLessons(run: LessonsRun, topics: LessonTopic[], parts: LessonPart[], reviews: LessonReview[], tasks: LessonTask[] = [], aiReviews: LessonAiReview[] = []): Lesson[] {
   const byTopic = new Map(parts.map((p) => [p.topicId, p]));
-  const pending = new Set(tasks.filter((t) => t.status === "queued" || t.status === "running").map((t) => t.targetId));
   const review = new Map(reviews.map((r) => [r.subsectionId, r]));
+  const ai = new Map(aiReviews.map((r) => [r.subsectionId, r]));
   const out: Lesson[] = [];
   for (const sec of run.sections.filter((x) => x.selected)) {
     for (const ss of sec.subsections) {
       const mine = topics.filter((t) => t.subsectionId === ss.id).sort((a, b) => a.number - b.number);
+      const ids = new Set(mine.map((t) => t.id));
+      const mineTasks = tasks.filter((t) => t.status === "queued" || t.status === "running").filter((t) => (t.stage === "review" ? t.targetId === ss.id : ids.has(t.targetId)));
       const rows = mine.map((topic) => ({ topic, part: byTopic.get(topic.id) ?? null }));
       const complete = rows.length > 0 && rows.every((r) => r.part);
+      const a = ai.get(ss.id);
+      const partsPending = mineTasks.some((t) => t.stage === "lesson");
       out.push({
         subsectionId: ss.id, title: ss.title, scope: ss.scope, sectionId: sec.id, topicIds: mine.map((t) => t.id), parts: rows,
-        status: complete ? (review.get(ss.id)?.status ?? "draft")
-          : mine.some((t) => pending.has(t.id)) ? "writing"
-            : rows.some((r) => r.part) ? "incomplete" : "not_started",
+        ai: a ? { verdict: a.verdict, issues: a.issues, round: a.round } : null,
+        pending: mineTasks.length,
+        inRun: rows.some((r) => r.part) || tasks.some((t) => (t.stage === "review" ? t.targetId === ss.id : ids.has(t.targetId))),
+        status: complete && !partsPending
+          ? (review.get(ss.id)?.status ?? (a ? (a.verdict === "pass" ? "ai_approved" : "flagged") : "checking"))
+          : partsPending ? "writing" : rows.some((r) => r.part) ? "incomplete" : "not_started",
       });
     }
   }

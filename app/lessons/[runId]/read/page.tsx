@@ -9,7 +9,7 @@ import { btn, fetcher, input } from "../../_components/ui";
 import type { Lesson, LessonsRun } from "../../../../lib/lessons/types";
 
 interface Detail { run: Omit<LessonsRun, "sourceText">; lessons: Lesson[] }
-type Filter = "all" | "not_started" | "writing" | "incomplete" | "draft" | "approved" | "rejected";
+type Filter = "all" | "checking" | "ai_approved" | "flagged" | "approved" | "rejected" | "writing";
 
 // Read and review the lessons, in learning order.
 export default function ReadLessons() {
@@ -24,7 +24,8 @@ export default function ReadLessons() {
 
   const { run, lessons } = data;
   const shown = (l: Lesson) => filter === "all" || l.status === filter;
-  const counts = { notStarted: lessons.filter((l) => l.status === "not_started").length, writing: lessons.filter((l) => l.status === "writing" || l.status === "incomplete").length, draft: lessons.filter((l) => l.status === "draft").length, approved: lessons.filter((l) => l.status === "approved").length, rejected: lessons.filter((l) => l.status === "rejected").length };
+  const count = (st: string) => lessons.filter((l) => l.status === st).length;
+  const counts = { writing: count("writing") + count("incomplete"), checking: count("checking"), aiApproved: count("ai_approved"), flagged: count("flagged"), approved: count("approved"), rejected: count("rejected") };
 
   async function decide(l: Lesson, action: "approve" | "reject") {
     const res = await fetch(`/api/lessons/runs/${runId}/lessons`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, subsectionId: l.subsectionId }) });
@@ -35,7 +36,7 @@ export default function ReadLessons() {
   async function approveAll() {
     const res = await fetch(`/api/lessons/runs/${runId}/lessons`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "approve_all" }) });
     const d = await res.json();
-    setNotice(res.ok ? `Approved ${d.approved ?? 0} lesson(s).` : (d.error ?? "Could not approve"));
+    setNotice(res.ok ? `Confirmed ${d.approved ?? 0} AI-approved lesson(s).` : (d.error ?? "Could not confirm"));
     mutate();
   }
 
@@ -43,26 +44,26 @@ export default function ReadLessons() {
     <Shell runId={runId}>
       <h1 className="text-2xl mb-1" style={{ color: "var(--text-primary)" }}>Lessons</h1>
       <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
-        {run.subject}: {lessons.length} lesson(s), one per subsection · {counts.notStarted} not started · {counts.writing} writing or incomplete · {counts.draft} awaiting you · {counts.approved} approved · {counts.rejected} rejected
+        {run.subject}: {lessons.length} lessons, one per subsection · {counts.writing} writing · {counts.checking} awaiting AI check · {counts.aiApproved} AI approved · {counts.flagged} flagged · {counts.approved} approved · {counts.rejected} rejected
       </p>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <select value={filter} onChange={(e) => setFilter(e.target.value as Filter)} style={{ ...input, width: "auto" }} aria-label="Filter lessons">
           <option value="all">All lessons</option>
-          <option value="not_started">Not started</option>
+          <option value="flagged">Flagged for you</option>
+          <option value="ai_approved">AI approved</option>
+          <option value="checking">Awaiting AI check</option>
           <option value="writing">Writing</option>
-          <option value="incomplete">Incomplete</option>
-          <option value="draft">Awaiting review</option>
           <option value="approved">Approved</option>
           <option value="rejected">Rejected</option>
         </select>
         <button style={btn("ghost")} onClick={() => setOpenAll((n) => (n % 2 === 0 ? n + 1 : n + 2))}>Open all</button>
         <button style={btn("ghost")} onClick={() => setOpenAll((n) => (n % 2 === 1 ? n + 1 : n + 2))}>Collapse all</button>
         <span className="flex-1" />
-        <button style={btn("ghost", counts.draft === 0)} disabled={counts.draft === 0} onClick={approveAll}>Approve all awaiting</button>
+        <button style={btn("ghost", counts.aiApproved === 0)} disabled={counts.aiApproved === 0} onClick={approveAll}>Confirm all AI-approved</button>
       </div>
       {notice && <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>{notice}</p>}
-      {lessons.every((l) => l.parts.every((p) => !p.part)) && <p className="text-sm" style={{ color: "var(--text-muted)" }}>Nothing written yet. Use Develop lessons or Choose lessons on the run page.</p>}
+      {lessons.every((l) => l.parts.every((p) => !p.part)) && <p className="text-sm" style={{ color: "var(--text-muted)" }}>Nothing written yet. Press Start on the run page, or use Add lessons.</p>}
 
       <div className="space-y-5">
         {run.sections.filter((sec) => sec.selected).map((sec) => {
