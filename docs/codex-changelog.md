@@ -5,6 +5,12 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: Stop button removed from the Lessons run page
+- The control bar is now just **Start / Resume** and **Pause**. Pause holds all work after the step in flight and keeps
+  everything queued, so nothing is dropped. The Stop action is removed from the page, the API and the engine. A run with
+  unfinished lessons and nothing queued now says "N lessons are not finished. Press Resume to continue."
+- Queued work can still be removed by rewriting or re-adding lessons from the lesson rows.
+
 ### Change: Add to run / Rewrite on each lesson row
 - The **Add to run** (lesson not in the run) and **Rewrite** (finished lesson; asks first, clears its AI check and any
   decision) buttons now sit on the collapsed lesson row, so several lessons can be queued without opening each one.
