@@ -533,7 +533,10 @@ async function runVerify(deps: Deps, run: CodexRun, task: CodexTask) {
     let status: QuestionStatus = "auto_passed";
     if (queued) status = hasError ? "draft" : "auto_passed"; // a corrected revision will replace the failing ones
     else if (hasError) status = "flagged";
-    await store.updateQuestion(run.id, q.id, { findings: [...structural, ...findings], verification, status });
+    // Parent questions only: a question the AI check passes is approved on the spot, with no person in the loop. Anything
+    // flagged (errors left after the allowed corrections) still waits for a person.
+    const auto = run.depth === "parentsChecked" && status === "auto_passed";
+    await store.updateQuestion(run.id, q.id, { findings: [...structural, ...findings], verification, status: auto ? "approved" : status, ...(auto ? { approvedBy: "ai" as const, decidedAt: iso(nowOf(deps)) } : {}) });
   }
 }
 
@@ -665,7 +668,7 @@ export async function decide(
     return { ok: false, error: "This question has an unresolved blocking finding; approve it explicitly to override." };
   }
   const status: QuestionStatus = decision === "approve" ? "approved" : "rejected";
-  await store.updateQuestion(runId, q.id, { status, decidedAt: iso(opts.now) });
+  await store.updateQuestion(runId, q.id, { status, decidedAt: iso(opts.now), ...(decision === "approve" ? { approvedBy: "person" as const } : {}) });
   return { ok: true, status };
 }
 

@@ -5,6 +5,15 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: parent questions approved automatically when the AI check passes
+- In the **Parent questions only, AI-checked and approved automatically** depth, a parent question that passes AI
+  verification (blind solve agrees, scientific review passes, after up to two corrections) becomes **Approved** on its own,
+  marked "by AI", with no button to press. It is immediately available in Codex Study.
+- Questions still failing after the corrections are **Flagged** and wait for a person. A person can still reject any
+  question, including ones the AI approved.
+- Other depths are unchanged: a person approves. This is a deliberate exception to the earlier rule that only a person
+  approves questions, so check a sample of AI-approved questions before relying on them.
+
 ### Change: parent questions only, with practice
 - **New Codex depth: "Parent questions only, with AI check".** Writes one parent question per saved topic and runs the
   AI verification (blind solve and scientific review, with up to two corrections) on each parent by itself. No atomic
