@@ -5,6 +5,22 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: parent-only runs are fully automatic, with three progress bars
+- **Depth renamed** "Parent questions only, checked, approved and saved automatically". Press Start once: each parent
+  question is written, checked by AI, approved if it passes, and copied to the question database straight away (each
+  question gets a `savedAt`). Nothing else to click. Only questions the AI still fails after two corrections are flagged
+  and wait for a person; when you approve one it is saved the same way.
+- **Run completes itself:** once every topic has an approved, saved parent (or one you rejected) and no step is left, the
+  run is marked saved. That locks it and hides its sections from the new-run list, as before. Remove from database still
+  undoes it (and clears the saved marks).
+- **Three bars on the run page** for checked depths: **Writing**, **AI check and approval** (with approved and
+  need-you counts) and **Saved to the question database**. Topics-only and unchecked depths keep one bar.
+- **Saved questions leave the list:** topics whose question is saved are hidden from the run's topic list, with a line
+  "N questions are saved to the database and hidden" and a Show them link.
+- **Unchanged:** fully verified runs (with atomic questions) are still approved and saved with buttons.
+- **Untested:** written without installed dependencies, so no type-check beyond syntax. The automatic path has never
+  run against a model: try one small section first.
+
 ### Change: Codex run page and new-run page made simpler (same approach as Lessons)
 - **One control card:** **Start / Resume** and **Pause** (no Stop), Parallel, one status sentence (Ready / Running / Not
   running / Finished / Locked), one progress bar for the whole run, and a single line naming each step with work

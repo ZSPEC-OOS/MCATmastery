@@ -6,7 +6,7 @@ export type CodexDepth = "topics" | "parents" | "parentsChecked" | "atomics" | "
 export const DEPTH_LABELS: Record<CodexDepth, string> = {
   topics:   "Topics only (builds the topic database)",
   parents:  "Through parent questions",
-  parentsChecked: "Parent questions only, AI-checked and approved automatically",
+  parentsChecked: "Parent questions only, checked, approved and saved automatically",
   atomics:  "Through atomic questions",
   verified: "Complete, with AI verification",
 };
@@ -170,6 +170,8 @@ export interface CodexQuestion {
   decidedAt?: string;
   /** Who approved it: a person, or the AI check (only for "parentsChecked" runs, which approve what the AI passes). */
   approvedBy?: "ai" | "person";
+  /** Set when this question was copied to the question database. Falsy = not saved. */
+  savedAt?: string;
 }
 
 /** One approved question as stored in the Codex database, copied out of its run. */

@@ -133,6 +133,7 @@ export interface Progress {
   failed: number;
   topics: number;
   questions: Record<QuestionStatus, number>;
+  saved: number;         // current questions already copied to the question database
 }
 
 export async function getProgress(store: CodexStore, runId: string): Promise<Progress> {
@@ -149,6 +150,7 @@ export async function getProgress(store: CodexStore, runId: string): Promise<Pro
     failed: tasks.filter((t) => t.status === "failed").length,
     topics: topics.length,
     questions: qs,
+    saved: questions.filter((q) => q.current && !!q.savedAt).length,
   };
 }
 
@@ -184,6 +186,7 @@ export async function advance(deps: Deps, runId: string): Promise<AdvanceResult>
       case "verify": await runVerify(deps, run, task); break;
     }
     await store.updateTask(runId, task.id, { status: "done", error: undefined, leaseUntil: undefined, updatedAt: iso(nowOf(deps)) });
+    await finalizeRun(store, runId, nowOf(deps)); // marked done first, so "no step left" is true for the last one
     return { ran: { id: task.id, stage: task.stage, targetId: task.targetId, outcome: "done" }, progress: await getProgress(store, runId) };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -535,8 +538,12 @@ async function runVerify(deps: Deps, run: CodexRun, task: CodexTask) {
     else if (hasError) status = "flagged";
     // Parent questions only: a question the AI check passes is approved on the spot, with no person in the loop. Anything
     // flagged (errors left after the allowed corrections) still waits for a person.
+    // It is also copied to the question database straight away, so a finished run needs no further clicks.
     const auto = run.depth === "parentsChecked" && status === "auto_passed";
-    await store.updateQuestion(run.id, q.id, { findings: [...structural, ...findings], verification, status: auto ? "approved" : status, ...(auto ? { approvedBy: "ai" as const, decidedAt: iso(nowOf(deps)) } : {}) });
+    const at = iso(nowOf(deps));
+    const doc = auto ? bankDoc(run, topic, q, at) : null;
+    if (doc) await store.putBankQuestions([doc]);
+    await store.updateQuestion(run.id, q.id, { findings: [...structural, ...findings], verification, status: auto ? "approved" : status, ...(auto ? { approvedBy: "ai" as const, decidedAt: at } : {}), ...(doc ? { savedAt: at } : {}) });
   }
 }
 
@@ -600,6 +607,40 @@ export function bankedSectionNumbers(runs: CodexRun[], subject: string): Set<num
   return out;
 }
 
+/** One question as stored in the question database (copied out of its run). */
+function bankDoc(run: CodexRun, t: CodexTopic, q: CodexQuestion, at: string): BankQuestion | null {
+  const sec = run.sections.find((s) => s.id === t.sectionId);
+  if (!sec) return null;
+  return {
+    id: `${run.id}__${q.qid}`, runId: run.id, subject: run.subject, sectionId: sec.id, sectionNumber: sec.number, sectionTitle: sec.title,
+    subsectionId: t.subsectionId, subsectionTitle: t.subsectionTitle, topicId: t.id, topicTitle: t.title,
+    qid: q.qid, kind: q.kind, ...(q.parentId ? { parentId: q.parentId } : {}), revision: q.revision, content: q.content, savedAt: at,
+  };
+}
+
+/**
+ * "Parent questions only, checked, approved and saved automatically" runs finish by themselves: once every topic has an
+ * approved, saved parent question (or one a person rejected) and no step is left, the run is marked saved, which locks it
+ * and hides its sections from the new-run list. Flagged questions keep it open until a person decides.
+ */
+async function finalizeRun(store: CodexStore, runId: string, now: Date) {
+  const run = await store.getRun(runId);
+  if (!run || run.depth !== "parentsChecked" || run.banked) return;
+  const [topics, questions, tasks] = await Promise.all([store.listTopics(runId), store.listQuestions(runId), store.listTasks(runId)]);
+  if (tasks.some((t) => isCodexStage(t.stage) && (t.status === "queued" || t.status === "running"))) return;
+  const parents = new Map(questions.filter((q) => q.current && q.kind === "parent").map((q) => [q.qid, q]));
+  let saved = 0;
+  for (const t of topics) {
+    const q = parents.get(t.id);
+    if (!q) return;                                   // not written yet
+    if (q.status === "rejected") continue;
+    if (q.status === "approved" && q.savedAt) { saved++; continue; }
+    return;                                           // still waiting for a check or a decision
+  }
+  if (saved === 0) return;
+  await store.setBanked(runId, { at: iso(now), questions: saved });
+}
+
 /** Why a run cannot be saved to the database yet. Empty means it can. */
 export function bankBlockers(run: CodexRun, progress: Progress): string[] {
   const out: string[] = [];
@@ -626,19 +667,18 @@ export async function bankRun(store: CodexStore, runId: string, now: Date): Prom
   const approvedParents = new Set(approved.filter((q) => q.kind === "parent").map((q) => q.qid));
   const topicOf = new Map(topics.map((t) => [t.id, t]));
   const list: BankQuestion[] = [];
+  const saved: CodexQuestion[] = [];
   for (const q of approved) {
     if (q.kind === "atomic" && !(q.parentId && approvedParents.has(q.parentId))) continue; // an atomic set is useless without its parent
     const t = topicOf.get(q.topicId);
-    const sec = t && run.sections.find((s) => s.id === t.sectionId);
-    if (!t || !sec) continue;
-    list.push({
-      id: `${runId}__${q.qid}`, runId, subject: run.subject, sectionId: sec.id, sectionNumber: sec.number, sectionTitle: sec.title,
-      subsectionId: t.subsectionId, subsectionTitle: t.subsectionTitle, topicId: t.id, topicTitle: t.title,
-      qid: q.qid, kind: q.kind, ...(q.parentId ? { parentId: q.parentId } : {}), revision: q.revision, content: q.content, savedAt: iso(now),
-    });
+    const doc = t && bankDoc(run, t, q, iso(now));
+    if (!doc) continue;
+    list.push(doc);
+    saved.push(q);
   }
   await store.putBankQuestions(list);
   if ((await store.countBankQuestions(runId)) !== list.length) return { ok: false, errors: ["The database count did not match after saving; the run was not locked. Try again."] };
+  for (const q of saved) await store.updateQuestion(runId, q.id, { savedAt: iso(now) });
   await store.setBanked(runId, { at: iso(now), questions: list.length });
   return { ok: true, questions: list.length };
 }
@@ -649,6 +689,7 @@ export async function unbankRun(store: CodexStore, runId: string): Promise<{ ok:
   if (!run) return { ok: false, error: "Run not found" };
   if (!run.banked) return { ok: false, error: "This run is not saved to the database." };
   const removed = await store.deleteBankQuestions(runId);
+  for (const q of (await store.listQuestions(runId)).filter((x) => x.savedAt)) await store.updateQuestion(runId, q.id, { savedAt: "" }); // "" = not saved (undefined cannot be written)
   await store.setBanked(runId, null);
   return { ok: true, removed };
 }
@@ -660,7 +701,8 @@ export type Decision = "approve" | "reject";
 export async function decide(
   store: CodexStore, runId: string, questionId: string, decision: Decision, opts: { override?: boolean; now: Date },
 ): Promise<{ ok: true; status: QuestionStatus } | { ok: false; error: string }> {
-  if ((await store.getRun(runId))?.banked) return { ok: false, error: "This run is saved to the database and locked. Remove it from the database to change decisions." };
+  const run = await store.getRun(runId);
+  if (run?.banked) return { ok: false, error: "This run is saved to the database and locked. Remove it from the database to change decisions." };
   const q = (await store.listQuestions(runId)).find((x) => x.id === questionId);
   if (!q) return { ok: false, error: "Question not found" };
   if (!q.current || q.status === "superseded") return { ok: false, error: "This revision has been superseded" };
@@ -668,7 +710,13 @@ export async function decide(
     return { ok: false, error: "This question has an unresolved blocking finding; approve it explicitly to override." };
   }
   const status: QuestionStatus = decision === "approve" ? "approved" : "rejected";
-  await store.updateQuestion(runId, q.id, { status, decidedAt: iso(opts.now), ...(decision === "approve" ? { approvedBy: "person" as const } : {}) });
+  // In a run that saves automatically, a question a person approves (e.g. one the AI flagged) is saved the same way.
+  const at = iso(opts.now);
+  const topic = decision === "approve" && run?.depth === "parentsChecked" ? await store.getTopic(runId, q.topicId) : null;
+  const doc = run && topic ? bankDoc(run, topic, q, at) : null;
+  if (doc) await store.putBankQuestions([doc]);
+  await store.updateQuestion(runId, q.id, { status, decidedAt: at, ...(decision === "approve" ? { approvedBy: "person" as const } : {}), ...(doc ? { savedAt: at } : {}) });
+  await finalizeRun(store, runId, opts.now);
   return { ok: true, status };
 }
 

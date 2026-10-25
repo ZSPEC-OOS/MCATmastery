@@ -21,7 +21,7 @@ interface RunRow {
 const DEPTH_HELP: Record<CodexDepth, string> = {
   topics: "Plans each major section and splits it into single-idea topics. No questions. Save the result to the topic database: this is the first step for everything else.",
   parents: "One parent question per saved topic. No AI check; you approve them (one button approves them all).",
-  parentsChecked: "One parent question per saved topic, checked by AI and approved automatically when it passes. The fastest way to get questions to practice.",
+  parentsChecked: "One parent question per saved topic, written, AI-checked, approved and saved to the question database automatically. You only step in for questions the AI cannot fix. The fastest way to get questions to practice.",
   atomics: "Parent questions plus the small prerequisite questions behind each one. No AI check; you approve them.",
   verified: "Everything: parent and atomic questions, the AI check with corrections, then your approval.",
 };
