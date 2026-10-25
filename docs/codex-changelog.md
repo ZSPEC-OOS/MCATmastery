@@ -5,6 +5,12 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: Database page sections expand
+- Each section row that has saved topics expands (click the row, or Expand all) to show its saved contents: the
+  planner's coverage summary and declared gaps, then every subsection (lesson) with its approval status and each split
+  topic; click a topic for its scope and learning target. Read-only. New route `/api/codex/database/section`.
+- **Untested:** written without installed dependencies, so no type-check or run.
+
 ### Change: Lessons are one per subsection, with every split topic as a part
 - **Unit of a lesson:** a subsection (MS-1-SS-2), titled "MS-1-SS-2 · <subsection title>". Its split topics are the
   lesson's organized parts, in curriculum order. MS-1 gives 7 lessons instead of 122 separate ones.
