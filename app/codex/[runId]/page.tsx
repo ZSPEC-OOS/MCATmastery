@@ -38,6 +38,7 @@ export default function RunPage() {
   const [notice, setNotice] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [dlApproved, setDlApproved] = useState(false);
+  const [showSaved, setShowSaved] = useState(false);
   const live = useRef(false);
   const lastMutate = useRef(0);
   const lastError = useRef("");
@@ -153,7 +154,8 @@ export default function RunPage() {
   const topicsSaved = run.topicsSaved;
   const locked = !!banked || !!topicsSaved;
   const counts = progress.questions;
-  const canSaveQuestions = run.depth === "verified" || run.depth === "parentsChecked";
+  const auto = run.depth === "parentsChecked";                  // writes, checks, approves and saves on its own
+  const canSaveQuestions = run.depth === "verified";            // saved with a button (parentsChecked saves itself)
   const unchecked = (run.depth === "parents" || run.depth === "atomics") && counts.draft > 0;
   const current = (qid: string) => questions.find((q) => q.qid === qid && q.current);
   const atomsOf = (id: string) => questions.filter((q) => q.parentId === id).sort((a, b) => a.qid.localeCompare(b.qid, undefined, { numeric: true }));
@@ -163,19 +165,25 @@ export default function RunPage() {
   const done = steps.reduce((n, s) => n + s.t.done, 0);
   const total = steps.reduce((n, s) => n + s.total, 0);
   const left = steps.reduce((n, s) => n + s.t.queued + s.t.running, 0);
-  const pct = total ? Math.round((done / total) * 100) : 0;
+  const stage = (k: keyof Progress["tasks"]) => { const t = progress.tasks[k]; return { done: t.done, total: t.queued + t.running + t.done + t.failed }; };
+  const written = { done: stage("parent").done + stage("atomic").done, total: stage("parent").total + stage("atomic").total };
+  const checks = stage("verify");
+  const savedTotal = Math.max(progress.saved, progress.topics - counts.rejected);
   const unfinished = progress.active && !locked;
   const phase = locked ? "locked" : running ? "running" : unfinished ? (done > 0 ? "paused" : "ready") : total === 0 ? "empty" : "finished";
 
   const statusText: Record<string, string> = {
-    locked: banked ? "Saved to the question database. This run is locked." : "Topics saved to the topic database. This run is locked.",
+    locked: banked ? (auto ? "Complete. Every question was written, checked, approved and saved to the question database." : "Saved to the question database. This run is locked.") : "Topics saved to the topic database. This run is locked.",
     running: "Running. Keep this page open; it is safe to pause.",
     paused: `Not running. ${left} step${left === 1 ? "" : "s"} left. Press Resume to continue.`,
-    ready: `Ready. ${left} step${left === 1 ? "" : "s"} queued. Nothing runs until you press Start.`,
+    ready: auto
+      ? `Ready. ${left} step${left === 1 ? "" : "s"} queued. Press Start: questions are written, checked, approved and saved automatically.`
+      : `Ready. ${left} step${left === 1 ? "" : "s"} queued. Nothing runs until you press Start.`,
     empty: "Nothing to do.",
     finished: topicsRun
       ? "Finished. Planning and splitting are done. Save the topics to the database to build questions and lessons from them."
-      : counts.auto_passed + counts.flagged + counts.draft > 0 ? "Finished writing and checking. Some questions are waiting for you below." : "Finished.",
+      : auto && counts.flagged > 0 ? `Finished. ${counts.flagged} question${counts.flagged === 1 ? " needs" : "s need"} your decision below; once decided ${counts.flagged === 1 ? "it is" : "they are"} saved automatically.`
+        : counts.auto_passed + counts.flagged + counts.draft > 0 ? "Finished writing and checking. Some questions are waiting for you below." : "Finished.",
   };
 
   const summary = topicsRun
@@ -226,21 +234,26 @@ export default function RunPage() {
         <p className="text-sm" style={{ color: phase === "running" ? TEAL : "var(--text-secondary)" }}>{statusText[phase]}</p>
 
         {total > 0 && (
-          <div>
-            <div className="flex justify-between text-xs mb-1" style={{ color: "var(--text-muted)" }}><span>Progress</span><span>{done}/{total} steps</span></div>
-            <div className="h-1.5 rounded-full" style={{ background: "var(--bg-input)" }}><div className="h-1.5 rounded-full" style={{ width: `${pct}%`, background: TEAL }} /></div>
-            <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
-              {steps.map((s) => `${s.label} ${s.t.done}/${s.total}`).join(" · ")}
-            </p>
-            {summary && <p className="text-xs mt-1" style={{ color: "var(--text-secondary)" }}>{summary}</p>}
+          <div className="space-y-3">
+            {(topicsRun || run.depth === "parents" || run.depth === "atomics") ? (
+              <Bar label="Progress" value={done} total={total} text={`${done}/${total} steps`} color={TEAL} />
+            ) : (
+              <>
+                <Bar label="Writing" value={written.done} total={written.total} text={`${written.done}/${written.total} written`} color={TEAL} />
+                <Bar label="AI check and approval" value={checks.done} total={checks.total} text={`${checks.done}/${checks.total} checked · ${counts.approved} approved${counts.flagged > 0 ? ` · ${counts.flagged} need you` : ""}`} color="#2563eb" />
+                <Bar label="Saved to the question database" value={progress.saved} total={savedTotal} text={`${progress.saved}/${savedTotal} saved`} color="#16a34a" />
+              </>
+            )}
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>{steps.map((s) => `${s.label} ${s.t.done}/${s.total}`).join(" · ")}</p>
+            {summary && <p className="text-xs" style={{ color: "var(--text-secondary)" }}>{summary}</p>}
           </div>
         )}
 
         {/* The next thing to do, only when there is something to do. */}
-        {(!locked && ((topicsRun && progress.topics > 0) || counts.auto_passed > 0 || unchecked || (canSaveQuestions && counts.approved > 0))) && (
+        {(!locked && ((topicsRun && progress.topics > 0) || (!auto && counts.auto_passed > 0) || unchecked || (canSaveQuestions && counts.approved > 0))) && (
           <div className="flex flex-wrap items-center gap-2 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
             {topicsRun && <button style={btn("primary", topicSaveBlockers.length > 0)} disabled={topicSaveBlockers.length > 0} onClick={saveTopics}>Save topics to database</button>}
-            {counts.auto_passed > 0 && <button style={btn("primary")} onClick={approvePassed}>Approve all that passed the AI check ({counts.auto_passed})</button>}
+            {!auto && counts.auto_passed > 0 && <button style={btn("primary")} onClick={approvePassed}>Approve all that passed the AI check ({counts.auto_passed})</button>}
             {unchecked && <button style={btn("ghost")} onClick={approveDrafts}>Approve all unchecked ({counts.draft})</button>}
             {!topicsRun && canSaveQuestions && counts.approved > 0 && <button style={btn("primary", bankBlockers.length > 0)} disabled={bankBlockers.length > 0} onClick={saveToDatabase}>Save to question database</button>}
             {topicsRun && topicSaveBlockers.length > 0 && <p className="basis-full text-xs" style={{ color: "var(--text-muted)" }}>Before you can save: {topicSaveBlockers[0]}</p>}
@@ -286,6 +299,13 @@ export default function RunPage() {
         </div>
       )}
 
+      {auto && progress.saved > 0 && (
+        <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>
+          {progress.saved} question{progress.saved === 1 ? " is" : "s are"} saved to the database and {showSaved ? "shown" : "hidden from this list"}.{" "}
+          <button className="underline" style={{ color: TEAL }} onClick={() => setShowSaved((v) => !v)}>{showSaved ? "Hide them" : "Show them"}</button>
+        </p>
+      )}
+
       <div className="space-y-6">
         {run.sections.filter((s) => s.selected).map((s) => (
           <section key={s.id}>
@@ -299,7 +319,7 @@ export default function RunPage() {
               <div key={ss.id} className="mb-4">
                 <h3 className="text-sm font-semibold mb-1.5" style={{ color: "var(--text-secondary)", fontFamily: "var(--font-roboto), system-ui, sans-serif" }}>{ss.id} · {ss.title}</h3>
                 <div className="space-y-1.5">
-                  {topics.filter((t) => t.subsectionId === ss.id).map((t) => {
+                  {topics.filter((t) => t.subsectionId === ss.id).filter((t) => showSaved || !(auto && current(t.id)?.savedAt)).map((t) => {
                     const parent = current(t.id);
                     const atoms = atomsOf(t.id);
                     const open = openTopic === t.id;
@@ -337,6 +357,16 @@ export default function RunPage() {
         <pre className="mt-6 p-3 text-xs overflow-x-auto" style={{ ...card, color: "var(--text-muted)" }}>{log.join("\n")}</pre>
       )}
     </Shell>
+  );
+}
+
+function Bar({ label, value, total, text, color }: { label: string; value: number; total: number; text: string; color: string }) {
+  const pct = total ? Math.min(100, Math.round((value / total) * 100)) : 0;
+  return (
+    <div>
+      <div className="flex justify-between text-xs mb-1" style={{ color: "var(--text-muted)" }}><span>{label}</span><span>{text}</span></div>
+      <div className="h-1.5 rounded-full" style={{ background: "var(--bg-input)" }}><div className="h-1.5 rounded-full" style={{ width: `${pct}%`, background: color }} /></div>
+    </div>
   );
 }
 
