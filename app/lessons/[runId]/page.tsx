@@ -25,6 +25,7 @@ export default function RunPage() {
   const [concurrency, setConcurrency] = useState(2);
   const [log, setLog] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
+  const [advanced, setAdvanced] = useState(false);
   const live = useRef(false);
   const lastMutate = useRef(0);
 
@@ -125,7 +126,7 @@ export default function RunPage() {
     paused: `Paused. ${waiting} step${waiting === 1 ? "" : "s"} waiting. Press Resume to continue.`,
     ready: `Ready. ${L.inRun} lesson${L.inRun === 1 ? "" : "s"} chosen (${L.partsTotal} parts). Nothing runs until you press Start.`,
     stopped: `Stopped. ${unfinished} lesson${unfinished === 1 ? " is" : "s are"} not finished. Press Start to continue ${unfinished === 1 ? "it" : "them"}.`,
-    empty: "No lessons chosen yet. Use Add lessons to choose some.",
+    empty: "No lessons chosen yet. Use Add lessons under Advanced to choose some.",
     finished: "Finished. Everything chosen has been written and checked.",
   };
   const approvedCount = L.aiApproved + L.approved;
@@ -168,12 +169,19 @@ export default function RunPage() {
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-2 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
-          <Link href={`/lessons/${runId}/choose`} style={{ ...btn("ghost"), textDecoration: "none" }}>Add lessons</Link>
-          <Link href={`/lessons/${runId}/read`} style={{ ...btn("ghost"), textDecoration: "none" }}>Read lessons</Link>
-          <button style={btn("ghost", L.aiApproved === 0)} disabled={L.aiApproved === 0} onClick={confirmAll}>Confirm all AI-approved ({L.aiApproved})</button>
-          <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/lessons/runs/${runId}/export?approved=1`}>Download approved</a>
-          <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/lessons/runs/${runId}/export`}>Download all</a>
+        <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+          <button className="text-xs font-semibold" style={{ color: "var(--text-muted)" }} aria-expanded={advanced || phase === "empty"} onClick={() => setAdvanced((v) => !v)}>
+            Advanced {advanced || phase === "empty" ? "▾" : "▸"}
+          </button>
+          {(advanced || phase === "empty") && (
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              <Link href={`/lessons/${runId}/choose`} style={{ ...btn("ghost"), textDecoration: "none" }}>Add lessons</Link>
+              <Link href={`/lessons/${runId}/read`} style={{ ...btn("ghost"), textDecoration: "none" }}>Read lessons</Link>
+              <button style={btn("ghost", L.aiApproved === 0)} disabled={L.aiApproved === 0} onClick={confirmAll}>Confirm all AI-approved ({L.aiApproved})</button>
+              <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/lessons/runs/${runId}/export?approved=1`}>Download approved</a>
+              <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/lessons/runs/${runId}/export`}>Download all</a>
+            </div>
+          )}
         </div>
       </section>
       {notice && <p className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>{notice}</p>}
