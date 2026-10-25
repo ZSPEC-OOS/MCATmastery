@@ -2,7 +2,7 @@
 // touch the Mastery question bank. Firebase is initialised by Mastery's own FIREBASE_SERVICE_ACCOUNT variable.
 // A memory implementation backs the offline self-test.
 
-import type { BankQuestion, CodexProgress, CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, RunBanked, RunSection } from "./types";
+import type { BankQuestion, CodexContent, CodexProgress, CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, RunBanked, RunSection } from "./types";
 import { docId, progressId } from "./types";
 
 export interface CodexStore {
@@ -11,6 +11,9 @@ export interface CodexStore {
   listRuns(): Promise<CodexRun[]>;
   updateRun(id: string, patch: Partial<CodexRun>): Promise<void>;
   deleteRun(id: string): Promise<void>;
+  putContent(c: CodexContent): Promise<void>;
+  listContent(runId: string): Promise<CodexContent[]>;
+  updateContent(runId: string, topicId: string, patch: Partial<CodexContent>): Promise<void>;
   /** Copies approved questions into the Codex database. Idempotent per document id. */
   putBankQuestions(list: BankQuestion[]): Promise<void>;
   deleteBankQuestions(runId: string): Promise<number>;
@@ -56,7 +59,7 @@ function applyAnswerTo(prev: CodexProgress | undefined, a: { userId: string; run
 
 // Earlier stages first: every plan, then every parent question, then every atomic set, then verification.
 // Corrections queued by verification re-enter at their own stage and are worked through in the same order.
-const STAGE_RANK: Record<CodexStage, number> = { plan: 0, expand: 1, parent: 2, atomic: 3, verify: 4 };
+const STAGE_RANK: Record<CodexStage, number> = { plan: 0, expand: 1, content: 2, parent: 3, atomic: 4, verify: 5 };
 
 export function pickClaimable(tasks: CodexTask[], now: Date): CodexTask[] {
   const t = now.getTime();
@@ -78,12 +81,16 @@ export function createMemoryStore(): CodexStore {
   const questions = new Map<string, CodexQuestion>();
   const progress = new Map<string, CodexProgress>();
   const bank = new Map<string, BankQuestion>();
+  const content = new Map<string, CodexContent>();
   const clone = <T>(v: T): T => structuredClone(v);
   return {
     async createRun(run) { runs.set(run.id, clone(run)); },
     async getRun(id) { const r = runs.get(id); return r ? clone(r) : null; },
     async listRuns() { return [...runs.values()].map(clone); },
     async updateRun(id, patch) { const r = runs.get(id); if (r) runs.set(id, { ...r, ...clone(patch) }); },
+    async putContent(c) { content.set(c.id, clone(c)); },
+    async listContent(runId) { return [...content.values()].filter((c) => c.runId === runId).map(clone); },
+    async updateContent(runId, topicId, patch) { const k = docId(runId, topicId); const c = content.get(k); if (c) content.set(k, { ...c, ...clone(patch) }); },
     async putBankQuestions(list) { for (const b of list) bank.set(b.id, clone(b)); },
     async deleteBankQuestions(runId) { let n = 0; for (const [k, v] of bank) if (v.runId === runId) { bank.delete(k); n++; } return n; },
     async countBankQuestions(runId) { return [...bank.values()].filter((b) => b.runId === runId).length; },
@@ -99,6 +106,7 @@ export function createMemoryStore(): CodexStore {
     },
     async deleteRun(id) {
       runs.delete(id);
+      for (const [k, v] of content) if (v.runId === id) content.delete(k);
       for (const m of [tasks, topics, questions, progress]) for (const [k, v] of m) if ((v as { runId: string }).runId === id) m.delete(k);
     },
     async putTasks(list) { for (const t of list) tasks.set(docId(t.runId, t.id), clone(t)); },
@@ -131,7 +139,7 @@ export function createMemoryStore(): CodexStore {
 
 // ── Firestore ───────────────────────────────────────────────────────────────
 
-const C = { runs: "codex_runs", tasks: "codex_tasks", topics: "codex_topics", questions: "codex_questions", progress: "codex_progress", bank: "codex_bank" } as const;
+const C = { runs: "codex_runs", tasks: "codex_tasks", topics: "codex_topics", questions: "codex_questions", progress: "codex_progress", bank: "codex_bank", content: "codex_content" } as const;
 
 /** Firestore rejects `undefined` field values; this strips them from nested data. */
 function clean<T>(v: T): T {
@@ -170,6 +178,9 @@ export function createFirestoreStore(): CodexStore {
     async getRun(id) { const d = await col(C.runs).doc(id).get(); return d.exists ? (d.data() as CodexRun) : null; },
     async listRuns() { return (await col(C.runs).get()).docs.map((d) => d.data() as CodexRun); },
     async updateRun(id, patch) { await col(C.runs).doc(id).update(clean(patch)); },
+    async putContent(c) { await col(C.content).doc(c.id).set(clean(c)); },
+    async listContent(runId) { return byRun<CodexContent>(C.content, runId); },
+    async updateContent(runId, topicId, patch) { await col(C.content).doc(docId(runId, topicId)).update(clean(patch)); },
     async putBankQuestions(list) {
       for (let i = 0; i < list.length; i += 400) {
         const batch = fsdb().batch();
@@ -200,7 +211,7 @@ export function createFirestoreStore(): CodexStore {
       });
     },
     async deleteRun(id) {
-      for (const name of [C.tasks, C.topics, C.questions, C.progress]) {
+      for (const name of [C.tasks, C.topics, C.questions, C.progress, C.content]) {
         const snap = await col(name).where("runId", "==", id).get();
         for (let i = 0; i < snap.docs.length; i += 400) {
           const batch = fsdb().batch();
