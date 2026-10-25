@@ -14,7 +14,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
     const approvedOnly = req.nextUrl.searchParams.get("approved") === "1";
     const now = new Date();
-    const doc = buildExport(run, await store.listTopics(id), await store.listQuestions(id), { approvedOnly, now, content: await store.listContent(id) });
+    const doc = buildExport(run, await store.listTopics(id), await store.listQuestions(id), { approvedOnly, now });
     const json = JSON.stringify(doc, null, 2);
     const name = `${run.subject.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${approvedOnly ? "approved" : "all"}-${now.toISOString().slice(0, 19).replace(/\D/g, "")}.json`;
 

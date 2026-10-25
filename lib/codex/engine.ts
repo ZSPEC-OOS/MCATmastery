@@ -11,14 +11,14 @@
 import type { CodexStore } from "./store";
 import { parseSubCodex } from "./subcodex";
 import {
-  ATOMIC_MAX_PER_PARENT, MAX_CORRECTION_ATTEMPTS, contentOn, docId, MAX_REPAIR_ROUNDS, MAX_TASK_ATTEMPTS, atomicId, depthAtLeast, isCarsSubject, splitTopicId, subsectionId, topicId,
+  ATOMIC_MAX_PER_PARENT, MAX_CORRECTION_ATTEMPTS, MAX_REPAIR_ROUNDS, MAX_TASK_ATTEMPTS, atomicId, depthAtLeast, isCarsSubject, splitTopicId, subsectionId, topicId,
 } from "./types";
 import type {
-  BankQuestion, CodexContent, CodexDepth, CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, Finding, QuestionContent, QuestionStatus, VerificationRecord,
+  BankQuestion, CodexDepth, CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, Finding, QuestionContent, QuestionStatus, VerificationRecord,
 } from "./types";
-import { checkAtomicSet, checkExpansion, checkLesson, checkParent, checkPlan } from "./checks";
+import { checkAtomicSet, checkExpansion, checkParent, checkPlan } from "./checks";
 import {
-  renderAtomicPrompt, renderBlindPrompt, renderCoveragePrompt, renderExpandPrompt, renderLessonPrompt, renderParentPrompt, renderPlanningPrompt, renderReviewPrompt,
+  renderAtomicPrompt, renderBlindPrompt, renderCoveragePrompt, renderExpandPrompt, renderParentPrompt, renderPlanningPrompt, renderReviewPrompt,
 } from "./prompts";
 
 // ── Dependencies ────────────────────────────────────────────────────────────
@@ -104,16 +104,15 @@ export interface Progress {
 }
 
 export async function getProgress(store: CodexStore, runId: string): Promise<Progress> {
-  const [tasks, topics, questions, run] = await Promise.all([store.listTasks(runId), store.listTopics(runId), store.listQuestions(runId), store.getRun(runId)]);
-  const held = (t: CodexTask) => run?.contentPaused === true && t.stage === "content" && t.status === "queued"; // paused lessons are not work "to do now"
+  const [tasks, topics, questions] = await Promise.all([store.listTasks(runId), store.listTopics(runId), store.listQuestions(runId)]);
   const empty = () => ({ queued: 0, running: 0, done: 0, failed: 0 });
-  const byStage: Progress["tasks"] = { plan: empty(), expand: empty(), content: empty(), parent: empty(), atomic: empty(), verify: empty() };
+  const byStage: Progress["tasks"] = { plan: empty(), expand: empty(), parent: empty(), atomic: empty(), verify: empty() };
   for (const t of tasks) byStage[t.stage][t.status]++;
   const qs: Progress["questions"] = { draft: 0, auto_passed: 0, flagged: 0, approved: 0, rejected: 0, superseded: 0 };
   for (const q of questions) qs[q.status]++;
   return {
     tasks: byStage,
-    active: tasks.some((t) => (t.status === "queued" || t.status === "running") && !held(t)),
+    active: tasks.some((t) => t.status === "queued" || t.status === "running"),
     failed: tasks.filter((t) => t.status === "failed").length,
     topics: topics.length,
     questions: qs,
@@ -140,14 +139,13 @@ export async function advance(deps: Deps, runId: string): Promise<AdvanceResult>
   if (!run) throw new Error("Run not found");
   if (run.status === "cancelled" || run.banked) return { ran: null, progress: await getProgress(store, runId) };
 
-  const task = await store.claimNextTask(runId, nowOf(deps), LEASE_MS, run.contentPaused ? ["content"] : undefined);
+  const task = await store.claimNextTask(runId, nowOf(deps), LEASE_MS);
   if (!task) return { ran: null, progress: await getProgress(store, runId) };
 
   try {
     switch (task.stage) {
       case "plan":   await runPlan(deps, run, task); break;
       case "expand": await runExpand(deps, run, task); break;
-      case "content": await runContent(deps, run, task); break;
       case "parent": await runParent(deps, run, task); break;
       case "atomic": await runAtomic(deps, run, task); break;
       case "verify": await runVerify(deps, run, task); break;
@@ -286,94 +284,9 @@ async function runExpand(deps: Deps, run: CodexRun, task: CodexTask) {
     await deps.store.updateTopic(run.id, topic.id, { expanded: true });
     parentTopics = children.map((c) => c.id);
   }
-  // Lessons: automatic for the "content" depth, or once the user has switched them on for this run.
-  const fresh = (await deps.store.getRun(run.id)) ?? run;
-  if (contentOn(fresh)) await deps.store.putTasks(parentTopics.map((id) => newTask(run.id, "content", id, now)));
   if (depthAtLeast(run.depth, "parents")) {
     await deps.store.putTasks(parentTopics.map((id) => newTask(run.id, "parent", id, now, "__r1")));
   }
-}
-
-// ── Reading lessons (content) ───────────────────────────────────────────────
-
-async function runContent(deps: Deps, run: CodexRun, task: CodexTask) {
-  const topic = await deps.store.getTopic(run.id, task.targetId);
-  if (!topic) throw new ContentFailure(`Unknown topic ${task.targetId}`, []);
-  const section = run.sections.find((s) => s.id === topic.sectionId)!;
-  const siblingTitles = (await deps.store.listTopics(run.id)).filter((t) => t.subsectionId === topic.subsectionId && t.id !== topic.id).map((t) => t.title);
-
-  const { value, warnings, model } = await generateValidated(deps, {
-    role: "generation",
-    maxTokens: 8000,
-    render: (repair) =>
-      renderLessonPrompt({
-        cars: isCarsSubject(run.subject),
-        subject: run.subject,
-        topic: { id: topic.id, title: topic.title, majorSection: section.title, subsection: topic.subsectionTitle, scope: topic.scope, primaryLearningTarget: topic.primaryLearningTarget },
-        siblingTitles,
-        ...(repair ? { repair } : {}),
-      }),
-    validate: (json) => checkLesson(json),
-  });
-
-  await deps.store.putContent({
-    id: docId(run.id, topic.id), runId: run.id, topicId: topic.id, status: "draft",
-    content: value, findings: warnings, model, createdAt: iso(nowOf(deps)),
-  });
-}
-
-/**
- * Switches lessons on for a run and queues one for every topic whose split has finished and that has none yet.
- * Topics split later are picked up automatically by runExpand.
- */
-export async function startContent(
-  store: CodexStore, runId: string, now: Date, topicIds?: string[],
-): Promise<{ ok: true; queued: number } | { ok: false; error: string }> {
-  const run = await store.getRun(runId);
-  if (!run) return { ok: false, error: "Run not found" };
-  if (run.banked) return { ok: false, error: "This run is saved to the database and locked." };
-  const [topics, tasks] = await Promise.all([store.listTopics(runId), store.listTasks(runId)]);
-  const splitDone = new Set(tasks.filter((t) => t.stage === "expand" && t.status === "done").map((t) => t.targetId));
-  const contentTasks = new Map(tasks.filter((t) => t.stage === "content").map((t) => [t.targetId, t]));
-  // A split-off topic (MS-1-SS-1-1.2) belongs to the broad topic it came from (MS-1-SS-1-1).
-  const origin = (t: CodexTopic) => (t.groupTitle ? t.id.replace(/\.\d+$/, "") : t.id);
-  const split = topics.filter((t) => splitDone.has(origin(t)));
-
-  let ready: CodexTopic[];
-  if (topicIds) {
-    // A chosen set: only those topics (a topic that already has a lesson is written again). Automatic lessons stay as they were.
-    const want = new Set(topicIds);
-    ready = split.filter((t) => want.has(t.id) && !["queued", "running"].includes(contentTasks.get(t.id)?.status ?? ""));
-  } else {
-    // Develop content for the whole run: switch lessons on so topics split later are added automatically.
-    await store.updateRun(runId, { contentEnabled: true });
-    ready = split.filter((t) => !contentTasks.has(t.id));
-  }
-  await store.updateRun(runId, { contentPaused: false });
-  await store.putTasks(ready.map((t) => newTask(runId, "content", t.id, iso(now))));
-  return { ok: true, queued: ready.length };
-}
-
-/** Pause holds lessons only (other stages carry on); resume releases them; stop drops every lesson not yet started and turns automatic lessons off. */
-export async function controlContent(store: CodexStore, runId: string, action: "pause" | "resume" | "stop"): Promise<{ ok: true; dropped?: number } | { ok: false; error: string }> {
-  const run = await store.getRun(runId);
-  if (!run) return { ok: false, error: "Run not found" };
-  if (action === "pause") { await store.updateRun(runId, { contentPaused: true }); return { ok: true }; }
-  if (action === "resume") { await store.updateRun(runId, { contentPaused: false }); return { ok: true }; }
-  const queued = (await store.listTasks(runId)).filter((t) => t.stage === "content" && t.status === "queued");
-  await store.deleteTasks(runId, queued.map((t) => t.id));
-  await store.updateRun(runId, { contentEnabled: false, contentPaused: false });
-  return { ok: true, dropped: queued.length };
-}
-
-export async function decideContent(
-  store: CodexStore, runId: string, topicId: string, decision: Decision, now: Date,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  if ((await store.getRun(runId))?.banked) return { ok: false, error: "This run is saved to the database and locked." };
-  const c = (await store.listContent(runId)).find((x) => x.topicId === topicId);
-  if (!c) return { ok: false, error: "Lesson not found" };
-  await store.updateContent(runId, topicId, { status: decision === "approve" ? "approved" : "rejected", decidedAt: iso(now) });
-  return { ok: true };
 }
 
 // ── Stage 2: parent questions ───────────────────────────────────────────────
@@ -672,11 +585,10 @@ export async function decide(
 
 // ── Export ──────────────────────────────────────────────────────────────────
 
-export function buildExport(run: CodexRun, topics: CodexTopic[], questions: CodexQuestion[], opts: { approvedOnly: boolean; now: Date; content?: CodexContent[] }) {
+export function buildExport(run: CodexRun, topics: CodexTopic[], questions: CodexQuestion[], opts: { approvedOnly: boolean; now: Date }) {
   const keep = (q: CodexQuestion) => q.current && q.status !== "superseded" && (!opts.approvedOnly || q.status === "approved");
   const qs = questions.filter(keep);
   const view = (q: CodexQuestion) => ({ id: q.qid, status: q.status, revision: q.revision, ...q.content, findings: q.findings, verification: q.verification, coverage: q.coverage, model: q.model });
-  const lessons = (opts.content ?? []).filter((c) => c.status !== "rejected" && (!opts.approvedOnly || c.status === "approved"));
   const byNum = (a: { number: number }, b: { number: number }) => a.number - b.number;
   return {
     schema: "mcat-codex.export",
@@ -692,8 +604,7 @@ export function buildExport(run: CodexRun, topics: CodexTopic[], questions: Code
         topics: topics.filter((t) => t.subsectionId === ss.id).sort(byNum).map((t) => {
           const parent = qs.find((q) => q.qid === t.id && q.kind === "parent");
           const atoms = qs.filter((q) => q.parentId === t.id).sort((a, b) => a.qid.localeCompare(b.qid, undefined, { numeric: true }));
-          const lesson = lessons.find((c) => c.topicId === t.id);
-          return { id: t.id, title: t.title, scope: t.scope, primaryLearningTarget: t.primaryLearningTarget, lesson: lesson ? { status: lesson.status, ...lesson.content } : null, parentQuestion: parent ? view(parent) : null, atomicQuestions: atoms.map(view) };
+          return { id: t.id, title: t.title, scope: t.scope, primaryLearningTarget: t.primaryLearningTarget, parentQuestion: parent ? view(parent) : null, atomicQuestions: atoms.map(view) };
         }),
       })),
     })),

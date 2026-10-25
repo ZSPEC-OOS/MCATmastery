@@ -1,13 +1,12 @@
 "use client";
 import { useState } from "react";
 import { Badge, btn } from "./ui";
-import type { CodexContent } from "../../../lib/codex/types";
+import type { LessonDoc } from "../../../lib/lessons/types";
 
-export default function LessonCard({ c, locked, onDecide, defaultOpen = false }: { c: CodexContent; locked: boolean; onDecide: (c: CodexContent, action: "approve" | "reject") => Promise<void>; defaultOpen?: boolean }) {
+export default function LessonCard({ c, onDecide, defaultOpen = false }: { c: LessonDoc; onDecide: (c: LessonDoc, action: "approve" | "reject") => Promise<void>; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const [busy, setBusy] = useState(false);
   const l = c.content;
-  const decided = c.status !== "draft";
 
   async function act(action: "approve" | "reject") {
     setBusy(true);
@@ -17,7 +16,6 @@ export default function LessonCard({ c, locked, onDecide, defaultOpen = false }:
   return (
     <div className="rounded-xl" style={{ border: "1px solid var(--border)", background: "var(--bg-elevated)" }}>
       <button className="w-full text-left p-3 flex items-start gap-2" onClick={() => setOpen((v) => !v)}>
-        <span className="text-xs font-semibold uppercase tracking-wider mt-0.5" style={{ color: "var(--text-muted)", minWidth: 96 }}>Lesson</span>
         <span className="flex-1 text-sm" style={{ color: "var(--text-primary)" }}>{l.title}</span>
         <Badge status={c.status} />
       </button>
@@ -28,6 +26,8 @@ export default function LessonCard({ c, locked, onDecide, defaultOpen = false }:
             <b style={{ color: "var(--text-primary)" }}>Objectives</b>
             <ul className="list-disc pl-5 mt-1 space-y-0.5">{l.objectives.map((o, i) => <li key={i}>{o}</li>)}</ul>
           </div>
+
+          {l.whyItMatters && <div><b style={{ color: "var(--text-primary)" }}>Why it matters.</b> {l.whyItMatters}</div>}
 
           {l.sections.map((s, i) => (
             <div key={i}>
@@ -50,6 +50,8 @@ export default function LessonCard({ c, locked, onDecide, defaultOpen = false }:
             </div>
           )}
 
+          {l.mcatFocus && <div><b style={{ color: "var(--text-primary)" }}>On the MCAT.</b> {l.mcatFocus}</div>}
+
           <div><b style={{ color: "var(--text-primary)" }}>Summary.</b> {l.summary}</div>
 
           <div className="text-xs space-y-0.5" style={{ color: "var(--text-muted)" }}>
@@ -60,8 +62,8 @@ export default function LessonCard({ c, locked, onDecide, defaultOpen = false }:
           </div>
 
           <div className="flex gap-2">
-            <button style={btn("primary", busy || locked || c.status === "approved")} disabled={busy || locked || c.status === "approved"} onClick={() => act("approve")}>{decided && c.status === "rejected" ? "Approve instead" : "Approve"}</button>
-            <button style={btn("danger", busy || locked || c.status === "rejected")} disabled={busy || locked || c.status === "rejected"} onClick={() => act("reject")}>Reject</button>
+            <button style={btn("primary", busy || c.status === "approved")} disabled={busy || c.status === "approved"} onClick={() => act("approve")}>{c.status === "rejected" ? "Approve instead" : "Approve"}</button>
+            <button style={btn("danger", busy || c.status === "rejected")} disabled={busy || c.status === "rejected"} onClick={() => act("reject")}>Reject</button>
           </div>
         </div>
       )}

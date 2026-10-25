@@ -5,39 +5,23 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
-### Change: lessons toolbar (pause/stop, choose lessons, view content)
-- A **Lessons** toolbar sits under the stage cards once any split has finished. It holds **Develop content** (moved
-  here from the Topic splits card), **Pause lessons / Resume lessons**, **Stop**, **Choose lessons** and
-  **View content**.
-- **Pause lessons** holds lesson work only; other stages keep running. **Resume** releases it. **Stop** drops every
-  lesson not yet started and turns automatic lessons off; lessons already written are kept. A lesson already in
-  flight finishes first (it cannot be cancelled mid-call).
-- **Choose lessons** (`/codex/<run>/lessons`): pick individual topics (by topic, by subsection, all, or only those
-  without a lesson) and develop just those. A topic that already has a lesson is replaced by a new draft after a
-  confirmation. Only topics whose split has finished are queued. It sends you back to the run and starts it.
-- **View content** (`/codex/<run>/content`): lessons only, no questions, grouped by section and subsection, with a
-  filter (all, awaiting, approved, rejected), open/collapse all, per-lesson Approve/Reject and Approve all.
-- **Fix:** the **Lessons** progress bar (lessons done of total) now shows whenever any lesson is queued or written,
-  including when topics were chosen by hand. It was hidden unless lessons had been switched on for the whole run.
-- **Untested:** written without installed dependencies, so no type-check or run.
-
-### Change: reading lessons ("Topics only + content")
-- **New run type:** *Topics only + content (reading lessons, no questions)*. It plans, splits, then writes one
-  reading lesson per split topic. No questions are generated.
-- **Optional on every other run type:** the **Topic splits** card shows a **Develop content** button once splits
-  exist. Pressing it switches lessons on for that run (even one already in progress) and queues a lesson for every
-  topic whose split has finished. Topics split later are added automatically. Without the button, lessons are never
-  written on the other run types. Press Run to develop them.
-- **Lesson shape:** objectives, titled sections of explanatory prose, key terms, common misconceptions, summary,
-  references and basis. Checks require at least two sections and 250 words and reject quiz-style wording. CARS
-  topics get a skill-teaching variant.
-- **Review:** each topic shows its lesson above its questions, with Approve and Reject; "Approve all lessons" is
-  in the run's action panel. Lessons are stored in the new `codex_content` collection and included in exports.
-- **Task order:** lessons run right after splits, ahead of parent questions, so pressing Develop content on a run
-  mid-way makes lessons the next thing it does.
-- **Not included:** AI verification of lessons, and saving lessons to the Codex database (the database holds
-  questions only for now).
-- **Untested:** written without installed dependencies, so no type-check or run.
+### Change: lessons moved out of Codex into a new app, MCAT Lessons
+- **Codex cleanup:** the reading-lesson work added earlier today (the "Topics only + content" run type, Develop
+  content, the Lessons toolbar and progress bar, Choose lessons, View content, `codex_content`) is removed from
+  Codex. Codex is questions-only again: plan, split, parent, atomic, verify, database. Existing Codex runs are
+  unaffected; any `codex_content` documents are simply no longer read.
+- **New third tile, MCAT Lessons** (`/lessons`, API under `/api/lessons`, code in `lib/lessons`): Subject, major
+  section, topic plan, topic splits, then one reading lesson per split topic. It generates lessons only. It keeps
+  its own Firestore collections (`lessons_runs`, `lessons_tasks`, `lessons_topics`, `lessons_items`).
+- **Reused from Codex (imports, not copies):** the Sub-Codex parser and subject presets, plan and split
+  validation (`checkPlan`, `checkExpansion`), and the model caller, so Lessons uses the same Admin model setting
+  (the "Codex" role if one is checked, otherwise the generation model).
+- **Enhancements over the Codex lesson step:** planning and splitting prompts are written for lessons and ask for
+  learning order (prerequisites first); lessons gain "why it matters" and "on the MCAT" fields; a run option
+  "write lessons automatically once topics are split" (on by default; off stops after the splits); a toolbar
+  (Develop lessons, Pause/Resume, Stop, Approve all, Choose lessons, Read lessons, Download).
+- **Not included:** study mode, AI verification of lessons, the database/locking feature.
+- **Untested:** written without installed dependencies, so no type-check or run. Try one small section first.
 
 ### Change: Codex database ("Save to database") and run locking
 - A finished run gets a **Save to database** button. It copies the run's approved questions into a new Firestore

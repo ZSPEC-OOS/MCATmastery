@@ -5,10 +5,9 @@ import { useParams } from "next/navigation";
 import useSWR from "swr";
 import CodexNavbar from "../_components/CodexNavbar";
 import QuestionCard from "../_components/QuestionCard";
-import LessonCard from "../_components/LessonCard";
 import { TEAL, btn, card, fetcher, input } from "../_components/ui";
-import { DEPTH_LABELS, contentOn } from "../../../lib/codex/types";
-import type { CodexContent, CodexQuestion, CodexRun, CodexTopic } from "../../../lib/codex/types";
+import { DEPTH_LABELS } from "../../../lib/codex/types";
+import type { CodexQuestion, CodexRun, CodexTopic } from "../../../lib/codex/types";
 import type { Progress } from "../../../lib/codex/engine";
 
 interface Detail {
@@ -17,12 +16,11 @@ interface Detail {
   questions: CodexQuestion[];
   failedTasks: { id: string; stage: string; targetId: string; error?: string }[];
   progress: Progress;
-  content: CodexContent[];
   bankBlockers: string[];
 }
 
 const STAGES: { key: keyof Progress["tasks"]; label: string }[] = [
-  { key: "plan", label: "Topic plans" }, { key: "expand", label: "Topic splits" }, { key: "content", label: "Lessons" }, { key: "parent", label: "Parent questions" }, { key: "atomic", label: "Atomic sets" }, { key: "verify", label: "Verification" },
+  { key: "plan", label: "Topic plans" }, { key: "expand", label: "Topic splits" }, { key: "parent", label: "Parent questions" }, { key: "atomic", label: "Atomic sets" }, { key: "verify", label: "Verification" },
 ];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -74,16 +72,6 @@ export default function RunPage() {
 
   const pause = () => { live.current = false; };
 
-  // The lesson-selection page sends you here with ?autostart=1 after queuing topics.
-  const autoStarted = useRef(false);
-  useEffect(() => {
-    if (autoStarted.current || !data || typeof window === "undefined") return;
-    if (new URLSearchParams(window.location.search).get("autostart") !== "1") return;
-    autoStarted.current = true;
-    window.history.replaceState({}, "", window.location.pathname);
-    if (data.progress.active) start();
-  }, [data, start]);
-
   async function decide(q: CodexQuestion, action: "approve" | "reject", override = false) {
     const res = await fetch(`/api/codex/runs/${runId}/questions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, questionId: q.id, override }) });
     if (!res.ok) setNotice((await res.json()).error ?? "Could not record the decision");
@@ -99,36 +87,6 @@ export default function RunPage() {
 
   async function retry() {
     await fetch(`/api/codex/runs/${runId}/retry`, { method: "POST" });
-    mutate();
-  }
-
-  async function startLessons() {
-    const res = await fetch(`/api/codex/runs/${runId}/content`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start" }) });
-    const d = await res.json();
-    setNotice(res.ok ? `Lessons switched on: ${d.queued} topic(s) queued. Topics split later are added automatically.` : (d.error ?? "Could not start lessons"));
-    await mutate();
-    if (res.ok && d.queued > 0) start();
-  }
-
-  async function lessonControl(action: "pause" | "resume" | "stop") {
-    if (action === "stop" && !confirm("Stop lessons? Lessons not yet started are dropped and automatic lessons switch off. Lessons already written are kept.")) return;
-    const res = await fetch(`/api/codex/runs/${runId}/content`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
-    const d = await res.json();
-    setNotice(!res.ok ? (d.error ?? "Could not update lessons") : action === "pause" ? "Lessons paused. Other stages are unaffected." : action === "resume" ? "Lessons resumed." : `Lessons stopped: ${d.dropped ?? 0} queued lesson(s) dropped.`);
-    await mutate();
-    if (action === "resume") start();
-  }
-
-  async function decideLesson(c: CodexContent, action: "approve" | "reject") {
-    const res = await fetch(`/api/codex/runs/${runId}/content`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, topicId: c.topicId }) });
-    if (!res.ok) setNotice((await res.json()).error ?? "Could not record the decision");
-    mutate();
-  }
-
-  async function approveLessons() {
-    const res = await fetch(`/api/codex/runs/${runId}/content`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "approve_all" }) });
-    const d = await res.json();
-    setNotice(res.ok ? `Approved ${d.approved ?? 0} lesson(s).` : (d.error ?? "Could not approve"));
     mutate();
   }
 
@@ -159,15 +117,7 @@ export default function RunPage() {
   if (error) return <Shell><p style={{ color: "var(--accent-red)" }}>{error.message}</p></Shell>;
   if (!data) return <Shell><p style={{ color: "var(--text-muted)" }}>Loading…</p></Shell>;
 
-  const { run, topics, questions, progress, failedTasks, bankBlockers, content } = data;
-  const lessonsOn = contentOn(run);
-  const contentRun = run.depth === "content";
-  const lessonOf = (tid: string) => content.find((c) => c.topicId === tid);
-  const lessonTasks = progress.tasks.content;
-  const lessonsPending = lessonTasks.queued + lessonTasks.running;
-  // Lessons can exist without the whole-run switch (topics chosen by hand), so show them whenever any are queued or written.
-  const lessonsShown = lessonsOn || lessonTasks.queued + lessonTasks.running + lessonTasks.done + lessonTasks.failed > 0 || content.length > 0;
-  const lessonCounts = { written: content.length, approved: content.filter((c) => c.status === "approved").length, draft: content.filter((c) => c.status === "draft").length };
+  const { run, topics, questions, progress, failedTasks, bankBlockers } = data;
   const banked = run.banked;
   const current = (qid: string) => questions.find((q) => q.qid === qid && q.current);
   const atomsOf = (id: string) => questions.filter((q) => q.parentId === id).sort((a, b) => a.qid.localeCompare(b.qid, undefined, { numeric: true }));
@@ -211,7 +161,7 @@ export default function RunPage() {
       {running && <p className="text-sm mb-3" style={{ color: TEAL }}>Running — keep this page open. It is safe to pause.</p>}
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 mb-4">
-        {STAGES.filter(({ key }) => (key === "content" ? lessonsShown : contentRun ? key === "plan" || key === "expand" : true)).map(({ key, label }) => {
+        {STAGES.map(({ key, label }) => {
           const t = progress.tasks[key];
           const total = t.queued + t.running + t.done + t.failed;
           const pct = total ? Math.round((t.done / total) * 100) : 0;
@@ -224,26 +174,6 @@ export default function RunPage() {
           );
         })}
       </section>
-
-      {(progress.tasks.expand.done > 0 || lessonsShown) && (
-        <section className="p-3 mb-4 flex flex-wrap items-center gap-2" style={card} aria-label="Lessons toolbar">
-          <span className="text-sm font-semibold mr-1" style={{ color: "var(--text-primary)" }}>Lessons</span>
-          <span className="text-xs mr-2" style={{ color: "var(--text-muted)" }}>
-            {lessonsShown
-              ? `${lessonCounts.written} written · ${lessonsPending} left${run.contentPaused ? " · paused" : ""}`
-              : "Optional reading lessons for each split topic"}
-          </span>
-          <span className="flex-1" />
-          {!banked && (!lessonsOn || (lessonsPending === 0 && !run.contentPaused)) && (
-            <button style={btn("primary")} onClick={startLessons}>Develop content</button>
-          )}
-          {!banked && !run.contentPaused && lessonsPending > 0 && <button style={btn("ghost")} onClick={() => lessonControl("pause")}>Pause lessons</button>}
-          {!banked && run.contentPaused && <button style={btn("primary")} onClick={() => lessonControl("resume")}>Resume lessons</button>}
-          {!banked && lessonTasks.queued > 0 && <button style={btn("danger")} onClick={() => lessonControl("stop")}>Stop</button>}
-          <Link href={`/codex/${runId}/lessons`} style={{ ...btn("ghost"), textDecoration: "none" }}>Choose lessons</Link>
-          <Link href={`/codex/${runId}/content`} style={{ ...btn("ghost"), textDecoration: "none" }}>View content</Link>
-        </section>
-      )}
 
       {failedTasks.length > 0 && (
         <div className="p-3 mb-4 text-sm" style={{ ...card, borderColor: "var(--accent-red)" }}>
@@ -258,24 +188,16 @@ export default function RunPage() {
       )}
 
       <section className="p-3 mb-4 flex flex-wrap items-center gap-2" style={card}>
-        {!contentRun && (
-          <span className="text-sm mr-2" style={{ color: "var(--text-secondary)" }}>
-            <b>{counts.approved}</b> approved · <b>{counts.auto_passed}</b> awaiting you · <b>{counts.flagged}</b> flagged · <b>{counts.rejected}</b> rejected
-          </span>
-        )}
-        {lessonsShown && (
-          <span className="text-sm mr-2" style={{ color: "var(--text-secondary)" }}>
-            Lessons: <b>{lessonCounts.written}</b> written · <b>{lessonCounts.approved}</b> approved · <b>{lessonCounts.draft}</b> awaiting you
-          </span>
-        )}
+        <span className="text-sm mr-2" style={{ color: "var(--text-secondary)" }}>
+          <b>{counts.approved}</b> approved · <b>{counts.auto_passed}</b> awaiting you · <b>{counts.flagged}</b> flagged · <b>{counts.rejected}</b> rejected
+        </span>
         <span className="flex-1" />
-        {lessonsShown && <button style={btn("ghost", lessonCounts.draft === 0 || !!banked)} disabled={lessonCounts.draft === 0 || !!banked} onClick={approveLessons}>Approve all lessons</button>}
-        {!contentRun && <button style={btn("ghost", counts.auto_passed === 0 || !!banked)} disabled={counts.auto_passed === 0 || !!banked} onClick={approvePassed}>Approve all that passed AI review</button>}
+        <button style={btn("ghost", counts.auto_passed === 0 || !!banked)} disabled={counts.auto_passed === 0 || !!banked} onClick={approvePassed}>Approve all that passed AI review</button>
         <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/codex/runs/${runId}/export?approved=1`}>Download approved</a>
         <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/codex/runs/${runId}/export`}>Download everything</a>
-        {!contentRun && <button style={btn("ghost", counts.approved === 0)} disabled={counts.approved === 0} onClick={() => saveToFirebase(true)}>Save approved to Firebase</button>}
-        {!banked && !contentRun && <button style={btn("primary", bankBlockers.length > 0)} disabled={bankBlockers.length > 0} onClick={saveToDatabase}>Save to database</button>}
-        {!banked && !contentRun && bankBlockers.length > 0 && progress.topics > 0 && (
+        <button style={btn("ghost", counts.approved === 0)} disabled={counts.approved === 0} onClick={() => saveToFirebase(true)}>Save approved to Firebase</button>
+        {!banked && <button style={btn("primary", bankBlockers.length > 0)} disabled={bankBlockers.length > 0} onClick={saveToDatabase}>Save to database</button>}
+        {!banked && bankBlockers.length > 0 && progress.topics > 0 && (
           <ul className="basis-full text-xs list-disc pl-5" style={{ color: "var(--text-muted)" }}>
             {bankBlockers.map((b) => <li key={b}>{b}</li>)}
           </ul>
@@ -305,15 +227,11 @@ export default function RunPage() {
                         <button className="w-full text-left p-3 flex items-center gap-2" onClick={() => setOpenTopic(open ? null : t.id)}>
                           <span className="text-xs font-mono" style={{ color: "var(--text-muted)", minWidth: 96 }}>{t.id}</span>
                           <span className="flex-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{t.groupTitle && <span className="block text-xs font-normal" style={{ color: "var(--text-muted)" }}>{t.groupTitle}</span>}{t.title}</span>
-                          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-                            {lessonOf(t.id) ? `lesson ${lessonOf(t.id)!.status}` : lessonsShown ? "no lesson yet" : ""}
-                            {!contentRun && `${lessonsShown ? " · " : ""}${parent ? `1 parent · ${atoms.length} atomic` : "no question yet"}`}
-                          </span>
+                          <span className="text-xs" style={{ color: "var(--text-muted)" }}>{parent ? `1 parent · ${atoms.length} atomic` : "no question yet"}</span>
                         </button>
                         {open && (
                           <div className="px-3 pb-3 space-y-2">
                             <p className="text-xs" style={{ color: "var(--text-muted)" }}><b>Scope:</b> {t.scope} <b>Target:</b> {t.primaryLearningTarget}</p>
-                            {lessonOf(t.id) && <LessonCard key={lessonOf(t.id)!.id} c={lessonOf(t.id)!} locked={!!banked} onDecide={decideLesson} />}
                             {parent && <QuestionCard key={parent.id} q={parent} onDecide={decide} />}
                             {atoms.length > 0 && <p className="text-xs font-semibold pt-1" style={{ color: "var(--text-muted)" }}>Atomic questions</p>}
                             {atoms.map((a) => <QuestionCard key={a.id} q={a} onDecide={decide} />)}

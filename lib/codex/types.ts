@@ -1,21 +1,19 @@
 // MCAT Codex — shared types and ID grammar.
 // Codex is a self-contained module: nothing here touches the Mastery question bank.
 
-export type CodexDepth = "topics" | "content" | "parents" | "atomics" | "verified";
+export type CodexDepth = "topics" | "parents" | "atomics" | "verified";
 
 export const DEPTH_LABELS: Record<CodexDepth, string> = {
   topics:   "Topics only",
-  content:  "Topics only + content (reading lessons, no questions)",
   parents:  "Through parent questions",
   atomics:  "Through atomic questions",
   verified: "Complete, with AI verification",
 };
 
-// "content" builds lessons instead of questions, so it ranks with "topics": it is never "at least parents".
-const DEPTH_RANK: Record<CodexDepth, number> = { topics: 0, content: 0, parents: 1, atomics: 2, verified: 3 };
+const DEPTH_RANK: Record<CodexDepth, number> = { topics: 0, parents: 1, atomics: 2, verified: 3 };
 export const depthAtLeast = (d: CodexDepth, min: CodexDepth) => DEPTH_RANK[d] >= DEPTH_RANK[min];
 
-export type CodexStage = "plan" | "expand" | "content" | "parent" | "atomic" | "verify";
+export type CodexStage = "plan" | "expand" | "parent" | "atomic" | "verify";
 export type TaskStatus = "queued" | "running" | "done" | "failed";
 
 /** Question lifecycle. Only a person can move a question to "approved". */
@@ -72,13 +70,7 @@ export interface CodexRun {
   createdBy: string;
   /** While set, the run is locked and its sections are hidden from the new-run picker. */
   banked?: RunBanked;
-  /** Lessons are developed for every split topic. Always on for the "content" depth; for other depths the user turns it on manually. */
-  contentEnabled?: boolean;
-  /** Lessons are held: content tasks are not claimed, every other stage carries on. */
-  contentPaused?: boolean;
 }
-
-export const contentOn = (run: Pick<CodexRun, "depth" | "contentEnabled">) => run.depth === "content" || run.contentEnabled === true;
 
 export interface CodexTopic {
   id: string;               // MS-1-SS-2-15 (also the parent question's id)
@@ -167,30 +159,6 @@ export interface CodexQuestion {
   findings: Finding[];      // structural warnings + verification findings
   verification?: VerificationRecord;
   coverage?: { verdict: "sufficient" | "insufficient" | "uncertain"; missing: string[]; unnecessary: number[] };
-  model?: string;
-  createdAt: string;
-  decidedAt?: string;
-}
-
-/** A reading lesson for one split topic. No questions: this is learning material. */
-export interface LessonContent {
-  title: string;
-  objectives: string[];
-  sections: { heading: string; body: string }[];
-  keyTerms: { term: string; definition: string }[];
-  misconceptions: { misconception: string; correction: string }[];
-  summary: string;
-  references: { citation: string; note?: string }[];
-  sourceBasis: string;
-}
-
-export interface CodexContent {
-  id: string;               // `${runId}__${topicId}` (document id)
-  runId: string;
-  topicId: string;
-  status: "draft" | "approved" | "rejected";
-  content: LessonContent;
-  findings: Finding[];
   model?: string;
   createdAt: string;
   decidedAt?: string;

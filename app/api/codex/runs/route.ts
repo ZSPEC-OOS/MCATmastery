@@ -3,7 +3,7 @@ import { createRun, getProgress } from "../../../../lib/codex/engine";
 import type { CodexDepth } from "../../../../lib/codex/types";
 import { errorResponse, getDeps, isDenied, requireCodexUser } from "../../../../lib/codex/runtime";
 
-const DEPTHS: CodexDepth[] = ["topics", "content", "parents", "atomics", "verified"];
+const DEPTHS: CodexDepth[] = ["topics", "parents", "atomics", "verified"];
 
 export async function GET() {
   const user = await requireCodexUser();

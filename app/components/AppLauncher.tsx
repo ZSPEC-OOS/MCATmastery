@@ -28,6 +28,17 @@ const APPS = [
       </svg>
     ),
   },
+  {
+    href: "/lessons",
+    title: "MCAT Lessons",
+    blurb: "Subject in, topic-by-topic reading lessons out — planned, split into single ideas and reviewed by you. No questions.",
+    accent: "#7c3aed",
+    icon: (
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M2 5.5A1.5 1.5 0 0 1 3.5 4H11v15H3.5A1.5 1.5 0 0 1 2 17.5z" /><path d="M22 5.5A1.5 1.5 0 0 0 20.5 4H13v15h7.5a1.5 1.5 0 0 0 1.5-1.5z" /><path d="M5 8h3M5 11h3M16 8h3M16 11h3" />
+      </svg>
+    ),
+  },
 ];
 
 export default function AppLauncher() {
@@ -59,7 +70,7 @@ export default function AppLauncher() {
         </h1>
         <p className="text-sm mb-8 text-center" style={{ color: "var(--text-muted)" }}>Choose an app to open.</p>
 
-        <div className="grid gap-5 w-full max-w-3xl md:grid-cols-2">
+        <div className="grid gap-5 w-full max-w-5xl md:grid-cols-3">
           {APPS.map((app) => (
             <Link
               key={app.href}
