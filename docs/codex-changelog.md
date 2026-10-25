@@ -5,6 +5,15 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Fix: unselected lessons showed "Writing"
+- **Symptom:** after choosing individual lessons, every lesson on the run page said "Writing", which looked as if all of
+  them were being written.
+- **Cause:** the label meant "not fully written yet", so lessons that were never queued showed it too. Only the chosen
+  lessons were actually queued (checked in the run-creation code).
+- **Fix:** lessons now show **Not started** (nothing written, nothing queued), **Writing** (parts queued or running),
+  **Incomplete** (some parts exist but none are queued), or draft/approved/rejected once every part exists. The run page
+  also shows "N in progress", and the Read page filter has the new states.
+
 ### Change: pick individual lessons when creating a Lessons run
 - On the Lessons new-run page, unticking **Write every lesson automatically** now lists each chosen section's
   subsections (one lesson each) with checkboxes, Select all and Clear. Only the ticked lessons are queued when the

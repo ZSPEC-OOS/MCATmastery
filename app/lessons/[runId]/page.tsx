@@ -150,7 +150,7 @@ export default function RunPage() {
       <section className="p-3 mb-4 flex flex-wrap items-center gap-2" style={card} aria-label="Lessons toolbar">
         <span className="text-sm font-semibold mr-1" style={{ color: "var(--text-primary)" }}>Lessons</span>
         <span className="text-xs mr-2" style={{ color: "var(--text-muted)" }}>
-          {progress.lessons.written}/{progress.lessons.total} lessons written · {progress.lessons.approved} approved · {progress.lessons.draft} awaiting you
+          {progress.lessons.written}/{progress.lessons.total} lessons written · {progress.lessons.writing} in progress · {progress.lessons.approved} approved · {progress.lessons.draft} awaiting you
           {lessonsPending > 0 ? ` · ${lessonsPending} part(s) left` : ""}{run.lessonsPaused ? " · paused" : ""}{!autoOn ? " · automatic lessons off" : ""}
         </span>
         <span className="flex-1" />

@@ -15,7 +15,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({
       run: { ...run, sourceText: undefined },
       topics: topics.sort((a, b) => a.number - b.number),
-      lessons: assembleLessons(run, topics, parts, reviews),
+      lessons: assembleLessons(run, topics, parts, reviews, tasks),
       failedTasks: tasks.filter((t) => t.status === "failed" && isLessonStage(t.stage)).map((t) => ({ id: t.id, stage: t.stage, targetId: t.targetId, error: t.error })),
       progress,
     });

@@ -70,7 +70,7 @@ export default function ChooseLessons() {
                       <label className="flex items-start gap-2 py-1.5 text-sm" style={{ color: "var(--text-primary)" }}>
                         <input type="checkbox" className="mt-1" checked={picked.has(l.subsectionId)} onChange={(e) => toggle([l.subsectionId], e.target.checked)} />
                         <span className="flex-1"><span className="font-mono text-xs mr-2" style={{ color: "var(--text-muted)" }}>{l.subsectionId}</span>{l.title}</span>
-                        <span className="text-xs whitespace-nowrap" style={{ color: written(l) > 0 ? ACCENT : "var(--text-muted)" }}>{written(l)}/{l.parts.length} parts · {l.status === "writing" ? "not complete" : l.status}</span>
+                        <span className="text-xs whitespace-nowrap" style={{ color: written(l) > 0 ? ACCENT : "var(--text-muted)" }}>{written(l)}/{l.parts.length} parts · {l.status === "not_started" ? "not started" : l.status}</span>
                       </label>
                     </li>
                   ))}

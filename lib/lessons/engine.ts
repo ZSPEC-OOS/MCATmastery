@@ -17,7 +17,7 @@ import type { TopicBank } from "../topicbank";
 import { checkLesson } from "./checks";
 import { renderLessonPrompt } from "./prompts";
 import { MAX_REPAIR_ROUNDS, MAX_TASK_ATTEMPTS, autoLessonsOn, docId, isCarsSubject, isLessonStage } from "./types";
-import { assembleLessons } from "./types";
+import { assembleLessons, isComplete } from "./types";
 import type { Finding, LessonPart, LessonStage, LessonTask, LessonTopic, LessonsRun } from "./types";
 
 export interface Deps {
@@ -107,7 +107,7 @@ export interface Progress {
   failed: number;
   topics: number;
   /** Lessons are subsections; a lesson is "written" once every one of its parts exists. */
-  lessons: { total: number; written: number; draft: number; approved: number; rejected: number; parts: number };
+  lessons: { total: number; written: number; writing: number; draft: number; approved: number; rejected: number; parts: number };
 }
 
 export async function getProgress(store: LessonsStore, runId: string): Promise<Progress> {
@@ -116,7 +116,7 @@ export async function getProgress(store: LessonsStore, runId: string): Promise<P
   const held = (t: LessonTask) => run?.lessonsPaused === true && t.status === "queued"; // paused lessons are not work "to do now"
   const byStage: Progress["tasks"] = { lesson: { queued: 0, running: 0, done: 0, failed: 0 } };
   for (const t of tasks) byStage[t.stage][t.status]++;
-  const lessons = run ? assembleLessons(run, topics, parts, reviews) : [];
+  const lessons = run ? assembleLessons(run, topics, parts, reviews, tasks) : [];
   return {
     tasks: byStage,
     active: tasks.some((t) => (t.status === "queued" || t.status === "running") && !held(t)),
@@ -124,7 +124,8 @@ export async function getProgress(store: LessonsStore, runId: string): Promise<P
     topics: topics.length,
     lessons: {
       total: lessons.length,
-      written: lessons.filter((l) => l.status !== "writing").length,
+      written: lessons.filter((l) => isComplete(l.status)).length,
+      writing: lessons.filter((l) => l.status === "writing").length,
       draft: lessons.filter((l) => l.status === "draft").length,
       approved: lessons.filter((l) => l.status === "approved").length,
       rejected: lessons.filter((l) => l.status === "rejected").length,
@@ -287,8 +288,8 @@ export async function controlLessons(store: LessonsStore, runId: string, action:
 export type Decision = "approve" | "reject";
 
 async function lessonsOf(store: LessonsStore, run: LessonsRun) {
-  const [topics, parts, reviews] = await Promise.all([store.listTopics(run.id), store.listParts(run.id), store.listReviews(run.id)]);
-  return assembleLessons(run, topics, parts, reviews);
+  const [topics, parts, reviews, tasks] = await Promise.all([store.listTopics(run.id), store.listParts(run.id), store.listReviews(run.id), store.listTasks(run.id)]);
+  return assembleLessons(run, topics, parts, reviews, tasks);
 }
 
 /** Decides a whole lesson (subsection). Only a lesson whose every part has been written can be decided. */
@@ -297,7 +298,7 @@ export async function decideLesson(store: LessonsStore, runId: string, subsectio
   if (!run) return { ok: false, error: "Run not found" };
   const lesson = (await lessonsOf(store, run)).find((l) => l.subsectionId === subsectionId);
   if (!lesson) return { ok: false, error: "Lesson not found" };
-  if (lesson.status === "writing") return { ok: false, error: "This lesson is still being written; decide it once every part exists." };
+  if (!isComplete(lesson.status)) return { ok: false, error: "This lesson is not fully written yet; decide it once every part exists." };
   await store.setReview({ id: docId(runId, subsectionId), runId, subsectionId, status: decision === "approve" ? "approved" : "rejected", decidedAt: iso(now) });
   return { ok: true };
 }
@@ -313,7 +314,7 @@ export async function approveAllLessons(store: LessonsStore, runId: string, now:
 // ── Export ──────────────────────────────────────────────────────────────────
 
 export function buildExport(run: LessonsRun, topics: LessonTopic[], parts: LessonPart[], reviews: import("./types").LessonReview[], opts: { approvedOnly: boolean; now: Date }) {
-  const lessons = assembleLessons(run, topics, parts, reviews).filter((l) => l.status !== "rejected" && l.status !== "writing" && (!opts.approvedOnly || l.status === "approved"));
+  const lessons = assembleLessons(run, topics, parts, reviews).filter((l) => l.status !== "rejected" && isComplete(l.status) && (!opts.approvedOnly || l.status === "approved"));
   return {
     schema: "mcat-lessons.export",
     schemaVersion: "2.0.0",
