@@ -115,11 +115,11 @@ export default function RunPage() {
   const L = progress.lessons;
   const waiting = progress.tasks.lesson.queued + progress.tasks.lesson.running + progress.tasks.review.queued + progress.tasks.review.running;
   const paused = run.lessonsPaused === true;
-  const finished = phase === "finished";
 
   // One honest status for the whole run.
   const unfinished = lessons.filter((l) => l.inRun && (l.status === "incomplete" || l.status === "checking")).length;
   const phase = running ? "running" : paused ? "paused" : progress.active ? "ready" : unfinished > 0 ? "stopped" : L.inRun === 0 ? "empty" : "finished";
+  const finished = phase === "finished";
   const statusText: Record<string, string> = {
     running: "Running. Keep this page open; it is safe to pause.",
     paused: `Paused. ${waiting} step${waiting === 1 ? "" : "s"} waiting. Press Resume to continue.`,
