@@ -86,6 +86,14 @@ export default function RunPage() {
     mutate();
   }
 
+  async function approveDrafts() {
+    if (!confirm(`Approve all ${data?.progress.questions.draft ?? 0} unchecked question(s)? No AI check was run on them, so only do this if you have read them or trust them.`)) return;
+    const res = await fetch(`/api/codex/runs/${runId}/questions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "approve_drafts" }) });
+    const d = await res.json();
+    setNotice(res.ok ? `Approved ${d.approved ?? 0} unchecked question(s). They are ready to practice in Study.` : (d.error ?? "Could not approve"));
+    mutate();
+  }
+
   async function retry() {
     await fetch(`/api/codex/runs/${runId}/retry`, { method: "POST" });
     mutate();
@@ -185,6 +193,7 @@ export default function RunPage() {
           const t = progress.tasks[key];
           const total = t.queued + t.running + t.done + t.failed;
           const early = key === "plan" || key === "expand";
+          if (run.depth === "parentsChecked" && key === "atomic") return false; // this depth has no atomic questions
           // Topics-only runs show just plan and split; runs built from the topic database skip the cards for work already done.
           return topicsRun ? early : early ? total > 0 : true;
         }).map(({ key, label }) => {
@@ -234,6 +243,9 @@ export default function RunPage() {
         </span>
         <span className="flex-1" />
         <button style={btn("ghost", counts.auto_passed === 0 || !!banked)} disabled={counts.auto_passed === 0 || !!banked} onClick={approvePassed}>Approve all that passed AI review</button>
+        {(run.depth === "parents" || run.depth === "atomics") && counts.draft > 0 && !banked && (
+          <button style={btn("ghost")} onClick={approveDrafts}>Approve all unchecked ({counts.draft})</button>
+        )}
         <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/codex/runs/${runId}/export?approved=1`}>Download approved</a>
         <a style={{ ...btn("ghost"), textDecoration: "none" }} href={`/api/codex/runs/${runId}/export`}>Download everything</a>
         <button style={btn("ghost", counts.approved === 0)} disabled={counts.approved === 0} onClick={() => saveToFirebase(true)}>Save approved to Firebase</button>

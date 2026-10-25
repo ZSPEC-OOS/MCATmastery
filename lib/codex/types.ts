@@ -1,16 +1,17 @@
 // MCAT Codex — shared types and ID grammar.
 // Codex is a self-contained module: nothing here touches the Mastery question bank.
 
-export type CodexDepth = "topics" | "parents" | "atomics" | "verified";
+export type CodexDepth = "topics" | "parents" | "parentsChecked" | "atomics" | "verified";
 
 export const DEPTH_LABELS: Record<CodexDepth, string> = {
   topics:   "Topics only (builds the topic database)",
   parents:  "Through parent questions",
+  parentsChecked: "Parent questions only, with AI check",
   atomics:  "Through atomic questions",
   verified: "Complete, with AI verification",
 };
 
-const DEPTH_RANK: Record<CodexDepth, number> = { topics: 0, parents: 1, atomics: 2, verified: 3 };
+const DEPTH_RANK: Record<CodexDepth, number> = { topics: 0, parents: 1, parentsChecked: 1, atomics: 2, verified: 3 };
 export const depthAtLeast = (d: CodexDepth, min: CodexDepth) => DEPTH_RANK[d] >= DEPTH_RANK[min];
 
 export type CodexStage = "plan" | "expand" | "parent" | "atomic" | "verify";
