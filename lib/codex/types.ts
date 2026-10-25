@@ -4,11 +4,11 @@
 export type CodexDepth = "topics" | "parents" | "parentsChecked" | "atomics" | "verified";
 
 export const DEPTH_LABELS: Record<CodexDepth, string> = {
-  topics:   "Topics only (builds the topic database)",
-  parents:  "Through parent questions",
-  parentsChecked: "Parent questions only, checked, approved and saved automatically",
-  atomics:  "Through atomic questions",
-  verified: "Complete, with AI verification",
+  topics:         "Topics only (first step)",
+  parents:        "Parent questions, I approve them",
+  parentsChecked: "Parent questions, fully automatic",
+  atomics:        "Parent + atomic questions, I approve them",
+  verified:       "Parent + atomic questions, AI-checked",
 };
 
 const DEPTH_RANK: Record<CodexDepth, number> = { topics: 0, parents: 1, parentsChecked: 1, atomics: 2, verified: 3 };
