@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProgress } from "../../../../../lib/codex/engine";
+import { bankBlockers, getProgress } from "../../../../../lib/codex/engine";
 import { errorResponse, getDeps, isDenied, requireCodexUser } from "../../../../../lib/codex/runtime";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -17,6 +17,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       questions: questions.filter((q) => q.current),
       failedTasks: tasks.filter((t) => t.status === "failed").map((t) => ({ id: t.id, stage: t.stage, targetId: t.targetId, error: t.error })),
       progress,
+      bankBlockers: bankBlockers(run, progress),
     });
   } catch (e) {
     return errorResponse(e);
@@ -28,7 +29,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (isDenied(user)) return user;
   try {
     const { id } = await params;
-    await getDeps().store.deleteRun(id);
+    const { store } = getDeps();
+    if ((await store.getRun(id))?.banked) return NextResponse.json({ error: "This run is saved to the database. Remove it from the database first." }, { status: 409 });
+    await store.deleteRun(id);
     return NextResponse.json({ ok: true });
   } catch (e) {
     return errorResponse(e);

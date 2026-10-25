@@ -13,6 +13,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const now = new Date();
 
     if (body.action === "approve_passed") {
+      if ((await store.getRun(id))?.banked) return NextResponse.json({ error: "This run is saved to the database and locked." }, { status: 409 });
       const qs = (await store.listQuestions(id)).filter((q) => q.current && q.status === "auto_passed");
       for (const q of qs) await decide(store, id, q.id, "approve", { now });
       return NextResponse.json({ approved: qs.length });

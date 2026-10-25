@@ -14,7 +14,7 @@ import {
   ATOMIC_MAX_PER_PARENT, MAX_CORRECTION_ATTEMPTS, MAX_REPAIR_ROUNDS, MAX_TASK_ATTEMPTS, atomicId, depthAtLeast, isCarsSubject, splitTopicId, subsectionId, topicId,
 } from "./types";
 import type {
-  CodexDepth, CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, Finding, QuestionContent, QuestionStatus, VerificationRecord,
+  BankQuestion, CodexDepth, CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, Finding, QuestionContent, QuestionStatus, VerificationRecord,
 } from "./types";
 import { checkAtomicSet, checkExpansion, checkParent, checkPlan } from "./checks";
 import {
@@ -60,7 +60,11 @@ export async function createRun(deps: Deps, input: CreateRunInput): Promise<{ ok
   const parsed = parseSubCodex(input.sourceText);
   if (!parsed.ok || !parsed.subject) return { ok: false, errors: parsed.errors };
 
-  const wanted = new Set(input.sectionNumbers?.length ? input.sectionNumbers : parsed.sections.map((s) => s.number));
+  const banked = bankedSectionNumbers(await deps.store.listRuns(), parsed.subject);
+  const wanted = new Set((input.sectionNumbers?.length ? input.sectionNumbers : parsed.sections.map((s) => s.number)).filter((n) => !banked.has(n)));
+  if (wanted.size === 0 && banked.size > 0) {
+    return { ok: false, errors: [{ line: null, code: "BANKED", message: "Every selected section is already saved to the database. Open its run and choose Remove from database to build it again." }] };
+  }
   const now = iso(nowOf(deps));
   const id = `run_${now.replace(/\D/g, "").slice(0, 14)}_${Math.random().toString(36).slice(2, 7)}`;
   const run: CodexRun = {
@@ -133,7 +137,7 @@ export async function advance(deps: Deps, runId: string): Promise<AdvanceResult>
   const { store } = deps;
   const run = await store.getRun(runId);
   if (!run) throw new Error("Run not found");
-  if (run.status === "cancelled") return { ran: null, progress: await getProgress(store, runId) };
+  if (run.status === "cancelled" || run.banked) return { ran: null, progress: await getProgress(store, runId) };
 
   const task = await store.claimNextTask(runId, nowOf(deps), LEASE_MS);
   if (!task) return { ran: null, progress: await getProgress(store, runId) };
@@ -498,6 +502,68 @@ async function runVerify(deps: Deps, run: CodexRun, task: CodexTask) {
   }
 }
 
+// ── Codex database (final bank) ─────────────────────────────────────────────
+
+/** Major-section numbers of `subject` that a saved (banked) run already holds. */
+export function bankedSectionNumbers(runs: CodexRun[], subject: string): Set<number> {
+  const out = new Set<number>();
+  for (const r of runs) if (r.banked && r.subject === subject) for (const s of r.sections) if (s.selected) out.add(s.number);
+  return out;
+}
+
+/** Why a run cannot be saved to the database yet. Empty means it can. */
+export function bankBlockers(run: CodexRun, progress: Progress): string[] {
+  const out: string[] = [];
+  if (run.banked) return ["Already saved to the database."];
+  if (run.depth !== "verified") out.push("Only runs built through AI verification can be saved.");
+  if (!run.sections.filter((s) => s.selected).every((s) => s.planned)) out.push("Not every major section has been planned.");
+  if (progress.active) out.push("Work remains: press Run until every stage is finished.");
+  if (progress.failed > 0) out.push(`${progress.failed} task(s) failed: retry them first.`);
+  const pending = progress.questions.draft + progress.questions.auto_passed + progress.questions.flagged;
+  if (pending > 0) out.push(`${pending} question(s) still need your decision (approve or reject).`);
+  if (progress.questions.approved === 0) out.push("No approved questions to save.");
+  return out;
+}
+
+/** Copies the run's approved questions into the database and locks the run. */
+export async function bankRun(store: CodexStore, runId: string, now: Date): Promise<{ ok: true; questions: number } | { ok: false; errors: string[] }> {
+  const run = await store.getRun(runId);
+  if (!run) return { ok: false, errors: ["Run not found"] };
+  const blockers = bankBlockers(run, await getProgress(store, runId));
+  if (blockers.length) return { ok: false, errors: blockers };
+
+  const [topics, questions] = await Promise.all([store.listTopics(runId), store.listQuestions(runId)]);
+  const approved = questions.filter((q) => q.current && q.status === "approved");
+  const approvedParents = new Set(approved.filter((q) => q.kind === "parent").map((q) => q.qid));
+  const topicOf = new Map(topics.map((t) => [t.id, t]));
+  const list: BankQuestion[] = [];
+  for (const q of approved) {
+    if (q.kind === "atomic" && !(q.parentId && approvedParents.has(q.parentId))) continue; // an atomic set is useless without its parent
+    const t = topicOf.get(q.topicId);
+    const sec = t && run.sections.find((s) => s.id === t.sectionId);
+    if (!t || !sec) continue;
+    list.push({
+      id: `${runId}__${q.qid}`, runId, subject: run.subject, sectionId: sec.id, sectionNumber: sec.number, sectionTitle: sec.title,
+      subsectionId: t.subsectionId, subsectionTitle: t.subsectionTitle, topicId: t.id, topicTitle: t.title,
+      qid: q.qid, kind: q.kind, ...(q.parentId ? { parentId: q.parentId } : {}), revision: q.revision, content: q.content, savedAt: iso(now),
+    });
+  }
+  await store.putBankQuestions(list);
+  if ((await store.countBankQuestions(runId)) !== list.length) return { ok: false, errors: ["The database count did not match after saving; the run was not locked. Try again."] };
+  await store.setBanked(runId, { at: iso(now), questions: list.length });
+  return { ok: true, questions: list.length };
+}
+
+/** Removes the run's questions from the database and unlocks the run and its sections. */
+export async function unbankRun(store: CodexStore, runId: string): Promise<{ ok: true; removed: number } | { ok: false; error: string }> {
+  const run = await store.getRun(runId);
+  if (!run) return { ok: false, error: "Run not found" };
+  if (!run.banked) return { ok: false, error: "This run is not saved to the database." };
+  const removed = await store.deleteBankQuestions(runId);
+  await store.setBanked(runId, null);
+  return { ok: true, removed };
+}
+
 // ── Human decisions ─────────────────────────────────────────────────────────
 
 export type Decision = "approve" | "reject";
@@ -505,6 +571,7 @@ export type Decision = "approve" | "reject";
 export async function decide(
   store: CodexStore, runId: string, questionId: string, decision: Decision, opts: { override?: boolean; now: Date },
 ): Promise<{ ok: true; status: QuestionStatus } | { ok: false; error: string }> {
+  if ((await store.getRun(runId))?.banked) return { ok: false, error: "This run is saved to the database and locked. Remove it from the database to change decisions." };
   const q = (await store.listQuestions(runId)).find((x) => x.id === questionId);
   if (!q) return { ok: false, error: "Question not found" };
   if (!q.current || q.status === "superseded") return { ok: false, error: "This revision has been superseded" };

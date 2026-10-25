@@ -12,6 +12,7 @@ import type { CodexDepth } from "../../lib/codex/types";
 
 interface RunRow {
   id: string; subject: string; depth: CodexDepth; status: string; createdAt: string; sections: number;
+  banked: { at: string; questions: number } | null; bankedSections: number[];
   progress: { active: boolean; failed: number; topics: number; questions: Record<string, number> };
 }
 
@@ -26,7 +27,14 @@ export default function CodexHome() {
 
   const text = useMemo(() => (preset === "" ? "" : presetText(SUBCODEX_PRESETS[Number(preset)])), [preset]);
   const parsed = useMemo(() => (text ? parseSubCodex(text) : null), [text]);
-  const selected = parsed?.ok ? (picked ?? new Set(parsed.sections.map((s) => s.number))) : new Set<number>();
+  // Sections already saved to the database are not offered; Remove from database (on the run) brings them back.
+  const bankedNumbers = useMemo(() => {
+    const out = new Set<number>();
+    if (parsed?.ok) for (const r of data?.runs ?? []) if (r.banked && r.subject === parsed.subject) r.bankedSections.forEach((n) => out.add(n));
+    return out;
+  }, [data, parsed]);
+  const available = parsed?.ok ? parsed.sections.filter((s) => !bankedNumbers.has(s.number)) : [];
+  const selected = parsed?.ok ? new Set((picked ? [...picked] : available.map((s) => s.number)).filter((n) => !bankedNumbers.has(n))) : new Set<number>();
 
   async function start() {
     setBusy(true); setError("");
@@ -66,10 +74,15 @@ export default function CodexHome() {
           {parsed?.ok && (
             <div className="space-y-3">
               <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                {parsed.subject} — {parsed.sections.length} major section{parsed.sections.length === 1 ? "" : "s"}
+                {parsed.subject} — {available.length} major section{available.length === 1 ? "" : "s"} available
               </p>
+              {bankedNumbers.size > 0 && (
+                <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  {bankedNumbers.size} section{bankedNumbers.size === 1 ? " is" : "s are"} saved in the database and hidden here. To bring one back, open its run and choose Remove from database.
+                </p>
+              )}
               <div className="grid gap-1.5 sm:grid-cols-2">
-                {parsed.sections.map((s) => (
+                {available.map((s) => (
                   <label key={s.number} className="flex items-center gap-2 text-sm" style={{ color: "var(--text-secondary)" }}>
                     <input
                       type="checkbox" checked={selected.has(s.number)}
@@ -113,7 +126,9 @@ export default function CodexHome() {
               <div key={r.id} className="p-4" style={card}>
                 <div className="flex items-start justify-between gap-2">
                   <Link href={`/codex/${r.id}`} className="font-semibold" style={{ color: TEAL }}>{r.subject}</Link>
-                  <button style={{ ...btn("ghost"), padding: "2px 8px", fontSize: 11 }} onClick={() => remove(r.id)}>Delete</button>
+                  {r.banked
+                    ? <span className="text-xs" style={{ color: TEAL }}>In database</span>
+                    : <button style={{ ...btn("ghost"), padding: "2px 8px", fontSize: 11 }} onClick={() => remove(r.id)}>Delete</button>}
                 </div>
                 <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
                   {new Date(r.createdAt).toLocaleString()} · {r.sections} section{r.sections === 1 ? "" : "s"} · {DEPTH_LABELS[r.depth]}

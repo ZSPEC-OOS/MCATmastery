@@ -2,7 +2,7 @@
 // touch the Mastery question bank. Firebase is initialised by Mastery's own FIREBASE_SERVICE_ACCOUNT variable.
 // A memory implementation backs the offline self-test.
 
-import type { CodexProgress, CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, RunSection } from "./types";
+import type { BankQuestion, CodexProgress, CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, RunBanked, RunSection } from "./types";
 import { docId, progressId } from "./types";
 
 export interface CodexStore {
@@ -11,6 +11,12 @@ export interface CodexStore {
   listRuns(): Promise<CodexRun[]>;
   updateRun(id: string, patch: Partial<CodexRun>): Promise<void>;
   deleteRun(id: string): Promise<void>;
+  /** Copies approved questions into the Codex database. Idempotent per document id. */
+  putBankQuestions(list: BankQuestion[]): Promise<void>;
+  deleteBankQuestions(runId: string): Promise<number>;
+  countBankQuestions(runId: string): Promise<number>;
+  /** Marks a run as saved (or, with null, removes the mark). */
+  setBanked(runId: string, banked: RunBanked | null): Promise<void>;
   /** Atomic read-modify-write of one major section, so parallel plan tasks cannot overwrite each other. */
   updateSection(runId: string, sectionNumber: number, patch: Partial<RunSection>): Promise<void>;
 
@@ -71,12 +77,22 @@ export function createMemoryStore(): CodexStore {
   const topics = new Map<string, CodexTopic>();
   const questions = new Map<string, CodexQuestion>();
   const progress = new Map<string, CodexProgress>();
+  const bank = new Map<string, BankQuestion>();
   const clone = <T>(v: T): T => structuredClone(v);
   return {
     async createRun(run) { runs.set(run.id, clone(run)); },
     async getRun(id) { const r = runs.get(id); return r ? clone(r) : null; },
     async listRuns() { return [...runs.values()].map(clone); },
     async updateRun(id, patch) { const r = runs.get(id); if (r) runs.set(id, { ...r, ...clone(patch) }); },
+    async putBankQuestions(list) { for (const b of list) bank.set(b.id, clone(b)); },
+    async deleteBankQuestions(runId) { let n = 0; for (const [k, v] of bank) if (v.runId === runId) { bank.delete(k); n++; } return n; },
+    async countBankQuestions(runId) { return [...bank.values()].filter((b) => b.runId === runId).length; },
+    async setBanked(runId, banked) {
+      const r = runs.get(runId);
+      if (!r) return;
+      const { banked: _drop, ...rest } = r;
+      runs.set(runId, banked ? { ...rest, banked: clone(banked) } : rest);
+    },
     async updateSection(runId, n, patch) {
       const r = runs.get(runId);
       if (r) runs.set(runId, { ...r, sections: r.sections.map((s) => (s.number === n ? { ...s, ...clone(patch) } : s)) });
@@ -115,7 +131,7 @@ export function createMemoryStore(): CodexStore {
 
 // ── Firestore ───────────────────────────────────────────────────────────────
 
-const C = { runs: "codex_runs", tasks: "codex_tasks", topics: "codex_topics", questions: "codex_questions", progress: "codex_progress" } as const;
+const C = { runs: "codex_runs", tasks: "codex_tasks", topics: "codex_topics", questions: "codex_questions", progress: "codex_progress", bank: "codex_bank" } as const;
 
 /** Firestore rejects `undefined` field values; this strips them from nested data. */
 function clean<T>(v: T): T {
@@ -154,6 +170,27 @@ export function createFirestoreStore(): CodexStore {
     async getRun(id) { const d = await col(C.runs).doc(id).get(); return d.exists ? (d.data() as CodexRun) : null; },
     async listRuns() { return (await col(C.runs).get()).docs.map((d) => d.data() as CodexRun); },
     async updateRun(id, patch) { await col(C.runs).doc(id).update(clean(patch)); },
+    async putBankQuestions(list) {
+      for (let i = 0; i < list.length; i += 400) {
+        const batch = fsdb().batch();
+        list.slice(i, i + 400).forEach((b) => batch.set(col(C.bank).doc(b.id), clean(b)));
+        await batch.commit();
+      }
+    },
+    async deleteBankQuestions(runId) {
+      const snap = await col(C.bank).where("runId", "==", runId).get();
+      for (let i = 0; i < snap.docs.length; i += 400) {
+        const batch = fsdb().batch();
+        snap.docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+      }
+      return snap.size;
+    },
+    async countBankQuestions(runId) { return (await col(C.bank).where("runId", "==", runId).count().get()).data().count; },
+    async setBanked(runId, banked) {
+      const { FieldValue } = require("firebase-admin/firestore") as typeof import("firebase-admin/firestore");
+      await col(C.runs).doc(runId).update({ banked: banked ? clean(banked) : FieldValue.delete() });
+    },
     async updateSection(runId, n, patch) {
       const ref = col(C.runs).doc(runId);
       await fsdb().runTransaction(async (tx) => {
