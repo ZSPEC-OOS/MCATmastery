@@ -138,7 +138,12 @@ export async function callModel(opts: {
         message?: { content?: string | Array<{ type: string; text?: string }> | null; reasoning_content?: string | null };
       }>;
       error?: unknown;
+      usage?: { prompt_cache_hit_tokens?: number; prompt_cache_miss_tokens?: number };
     };
+    // DeepSeek caches repeated prompt prefixes automatically (no request flag) and reports hits and misses here.
+    if (data.usage?.prompt_cache_hit_tokens !== undefined) {
+      console.log(`[model] prompt cache: ${data.usage.prompt_cache_hit_tokens} hit, ${data.usage.prompt_cache_miss_tokens ?? 0} miss`);
+    }
     const choice       = data.choices?.[0];
     const msg          = choice?.message;
     const finishReason = choice?.finish_reason;
@@ -200,16 +205,9 @@ export async function callModel(opts: {
     const msg = await anthropic.messages.create({
       model:      modelId ?? "claude-opus-4-7",
       max_tokens: anthropicMaxTokens,
-      // The system prompt is the same static text on every call of a stage, so mark it cacheable:
-      // repeat calls within the cache lifetime read it at a fraction of the input price.
-      // Prompts below the model's minimum cacheable length are simply processed normally.
-      system:     [{ type: "text", text: opts.system, cache_control: { type: "ephemeral" } }],
+      system:     opts.system,
       messages:   [{ role: "user", content: opts.userContent }],
     });
-    const u = msg.usage as { cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null } | undefined;
-    if (u?.cache_read_input_tokens || u?.cache_creation_input_tokens) {
-      console.log(`[model] prompt cache: ${u.cache_read_input_tokens ?? 0} read, ${u.cache_creation_input_tokens ?? 0} written`);
-    }
     const block = msg.content[0];
     if (!block || block.type !== "text" || !block.text) {
       throw new Error(`Anthropic model returned no text content (block type: ${block?.type ?? "none"})`);

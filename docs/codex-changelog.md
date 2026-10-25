@@ -5,15 +5,16 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
-### Change: prompt caching for Claude models
-- `lib/model.ts` (Anthropic path, used by Codex and Lessons): the system prompt is now sent as a cacheable block.
-  The system prompts are identical on every call of a stage (plan, expand, parent, atomic, check, lesson part, lesson
-  review), so repeat calls within about 5 minutes read them at roughly a tenth of the normal input price.
-  Cache hits and writes are logged as `[model] prompt cache: N read, M written`.
-- Limits: the prompt must exceed the model's minimum cacheable length (about 1,000 to 4,000 tokens depending on model),
-  otherwise it is processed normally. Custom OpenAI-compatible endpoints are unchanged; those providers cache
-  repeated prompt prefixes on their own, and the static system text already comes first.
-- Not yet verified against a live API call: check the server log for the cache line after a run starts.
+### Change: DeepSeek prompt caching
+- DeepSeek caches repeated prompt prefixes automatically (no request flag), so caching is about keeping the start of
+  every request identical. The static system prompt already comes first; lesson-writing prompts were reordered so the
+  lesson title, scope and sibling topics (same for every part of a lesson) precede the topic and part number.
+  The AI-check prompt already had its shared lesson context first.
+- `lib/model.ts` logs `[model] prompt cache: N hit, M miss` from DeepSeek's usage report on each call. The Anthropic
+  path is unchanged.
+- Caching is best effort and not instant: DeepSeek builds the cache in the background, so hits show on later calls
+  (typically seconds to minutes later); only the shared prefix is discounted. Not yet verified against a live call.
+
 ### Change: clearer names for the Codex "What to build" choices
 - Topics only (first step) · Parent questions, I approve them · Parent questions, fully automatic · Parent + atomic
   questions, I approve them · Parent + atomic questions, AI-checked. The names appear in the selector, the run header and the

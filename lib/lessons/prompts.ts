@@ -78,9 +78,11 @@ export function renderLessonPrompt(ctx: {
   }
   return {
     system: ctx.cars ? LESSON_CARS_SYSTEM : LESSON_SYSTEM,
-    prompt: `<lesson>${data(ctx.lesson)}</lesson>
-<topic>${data({ subject: ctx.subject, ...ctx.topic })}</topic>
+    // Content shared by every part of a lesson comes first and what changes per call last, so providers that
+    // cache repeated prompt prefixes (DeepSeek does, automatically) reuse as much of it as possible.
+    prompt: `<lesson>${data({ title: ctx.lesson.title, scope: ctx.lesson.scope })}</lesson>
 <sibling_topics>${data(ctx.siblingTitles)}</sibling_topics>
+<topic>${data({ subject: ctx.subject, ...ctx.topic })}</topic>
 ${extra.join("\n")}
 Write part ${ctx.lesson.part} of ${ctx.lesson.of} of the lesson "${ctx.lesson.title}": the part that teaches the topic above.`,
   };
