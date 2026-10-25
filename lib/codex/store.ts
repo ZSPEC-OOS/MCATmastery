@@ -3,7 +3,7 @@
 // A memory implementation backs the offline self-test.
 
 import type { BankQuestion, CodexProgress, CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, RunBanked, RunSection } from "./types";
-import { docId, progressId } from "./types";
+import { docId, isCodexStage, progressId } from "./types";
 
 export interface CodexStore {
   createRun(run: CodexRun): Promise<void>;
@@ -62,6 +62,7 @@ export function pickClaimable(tasks: CodexTask[], now: Date): CodexTask[] {
   const t = now.getTime();
   return tasks
     .filter((x) => {
+      if (!isCodexStage(x.stage)) return false;
       if (x.status === "queued") return !x.notBefore || new Date(x.notBefore).getTime() <= t;
       if (x.status === "running") return !!x.leaseUntil && new Date(x.leaseUntil).getTime() < t;
       return false;

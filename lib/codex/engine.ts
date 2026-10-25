@@ -11,7 +11,7 @@
 import type { CodexStore } from "./store";
 import { parseSubCodex } from "./subcodex";
 import {
-  ATOMIC_MAX_PER_PARENT, MAX_CORRECTION_ATTEMPTS, MAX_REPAIR_ROUNDS, MAX_TASK_ATTEMPTS, atomicId, depthAtLeast, isCarsSubject, splitTopicId, subsectionId, topicId,
+  ATOMIC_MAX_PER_PARENT, MAX_CORRECTION_ATTEMPTS, MAX_REPAIR_ROUNDS, isCodexStage, MAX_TASK_ATTEMPTS, atomicId, depthAtLeast, isCarsSubject, splitTopicId, subsectionId, topicId,
 } from "./types";
 import type {
   BankQuestion, CodexDepth, CodexQuestion, CodexRun, CodexStage, CodexTask, CodexTopic, Finding, QuestionContent, QuestionStatus, VerificationRecord,
@@ -104,9 +104,10 @@ export interface Progress {
 }
 
 export async function getProgress(store: CodexStore, runId: string): Promise<Progress> {
-  const [tasks, topics, questions] = await Promise.all([store.listTasks(runId), store.listTopics(runId), store.listQuestions(runId)]);
+  const [allTasks, topics, questions] = await Promise.all([store.listTasks(runId), store.listTopics(runId), store.listQuestions(runId)]);
   const empty = () => ({ queued: 0, running: 0, done: 0, failed: 0 });
   const byStage: Progress["tasks"] = { plan: empty(), expand: empty(), parent: empty(), atomic: empty(), verify: empty() };
+  const tasks = allTasks.filter((t) => isCodexStage(t.stage));
   for (const t of tasks) byStage[t.stage][t.status]++;
   const qs: Progress["questions"] = { draft: 0, auto_passed: 0, flagged: 0, approved: 0, rejected: 0, superseded: 0 };
   for (const q of questions) qs[q.status]++;
@@ -120,7 +121,7 @@ export async function getProgress(store: CodexStore, runId: string): Promise<Pro
 }
 
 export async function retryFailed(store: CodexStore, runId: string, now: Date): Promise<number> {
-  const failed = (await store.listTasks(runId)).filter((t) => t.status === "failed");
+  const failed = (await store.listTasks(runId)).filter((t) => t.status === "failed" && isCodexStage(t.stage));
   for (const t of failed) await store.updateTask(runId, t.id, { status: "queued", attempts: 0, error: undefined, notBefore: undefined, leaseUntil: undefined, updatedAt: iso(now) });
   return failed.length;
 }
