@@ -146,6 +146,18 @@ export interface LessonReview {
   decidedAt: string;
 }
 
+/** A learner's reading progress in one lesson (Study). One document per user and lesson. */
+export interface LessonReading {
+  id: string;               // `${userId}__${runId}__${subsectionId}` (document id)
+  userId: string;
+  runId: string;
+  subsectionId: string;
+  readParts: string[];      // topic ids the learner has read
+  lastPart?: string;        // where they were last reading
+  updatedAt: string;
+}
+export const readingId = (userId: string, runId: string, subsectionId: string) => [userId, runId, subsectionId].join("__");
+
 /**
  * not_started: nothing written and nothing queued. writing: parts queued or running. incomplete: some parts exist but
  * none are queued. checking: every part exists, the AI check has not finished. ai_approved: the AI reviewer passed it

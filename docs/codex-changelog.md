@@ -5,6 +5,39 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
+### Change: Add to run / Rewrite on each lesson row
+- The **Add to run** (lesson not in the run) and **Rewrite** (finished lesson; asks first, clears its AI check and any
+  decision) buttons now sit on the collapsed lesson row, so several lessons can be queued without opening each one.
+  They only queue; press Start or Resume to write. On a phone the "N parts" count is hidden to make room.
+
+### Change: simpler Advanced section on the Lessons run page; one Download button
+- **Removed** the Add lessons and Read lessons buttons (and their pages). Reading now happens in **Study**.
+- **Advanced** now holds **Confirm all AI-approved** and a single **Download** button. Clicking Download opens a small
+  chooser: **All lessons** or **Selected lessons** (tick the lessons you want), plus an **Approved only** checkbox.
+  The export route accepts `?lessons=MS-1-SS-1,MS-1-SS-2` for the selected set.
+- **Adding and rewriting lessons moved into the lesson itself:** open a lesson below the controls to find **Add to run**
+  (for a lesson not in this run) or **Rewrite lesson** (clears its AI check and any decision). Both only queue; press
+  Start or Resume to write.
+- **Untested:** written without installed dependencies, so no type-check beyond syntax.
+
+### Change: MCAT Lessons Study section and reader
+- **Build / Study tabs** in the Lessons navbar. **Study** (`/lessons/study`) is a library of every lesson that is
+  approved (a person approved it, or the AI passed it and no one rejected it), grouped by subject and major section,
+  with parts, estimated reading time (200 words a minute) and your progress. Where the same lesson exists in several
+  runs, the newest approved copy is shown.
+- **Reader** (`/lessons/study/<run>/<lesson>`): one calm column about 42rem wide, 19px serif text at 1.8 line height by
+  default, parts shown as Part n of N with objectives, why it matters, headed sections, a key-terms card, a "Watch out"
+  card for misconceptions, an "On the MCAT" card, a recap, and sources folded away. Contents panel (sticky on wide
+  screens, a drop-down on phones) with read marks and the part you are in; a thin reading-progress bar; Previous /
+  Next lesson links; "Continue where you left off".
+- **Reading settings** (Aa): text size 15 to 27, serif or sans, "Match the app" or a warm "Paper" page. Kept in this
+  browser only.
+- **Progress** is saved to your account (`lessons_reading`, one document per user and lesson): a part counts as read
+  when you scroll past its end or tick Mark as read; your place is saved as you read.
+- **Not included:** notes or highlights, search, questions or flashcards from a lesson, reading offline.
+- **Untested:** written without installed dependencies and never viewed on a screen, so no type-check beyond syntax
+  and no layout check. Send a screenshot of the reader on your phone if anything looks off.
+
 ### Change: Lessons run page, secondary actions moved under Advanced
 - Add lessons, Read lessons, Confirm all AI-approved and the two downloads now sit in a collapsed **Advanced** section
   of the control card, so the page shows just Start / Pause / Stop, one status line and one progress bar. Advanced

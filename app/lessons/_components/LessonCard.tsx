@@ -18,7 +18,7 @@ const LABEL: Record<string, { text: string; color: string }> = {
 };
 
 /** One lesson = one subsection (MS-1-SS-2), shown as organized parts, one per split topic. */
-export default function LessonCard({ lesson, onDecide, defaultOpen = false }: { lesson: Lesson; onDecide: (l: Lesson, action: "approve" | "reject") => Promise<void>; defaultOpen?: boolean }) {
+export default function LessonCard({ lesson, onDecide, onQueue, defaultOpen = false }: { lesson: Lesson; onDecide: (l: Lesson, action: "approve" | "reject") => Promise<void>; onQueue?: (l: Lesson) => Promise<void>; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const [busy, setBusy] = useState(false);
   const written = lesson.parts.filter((p) => p.part).length;
@@ -27,6 +27,17 @@ export default function LessonCard({ lesson, onDecide, defaultOpen = false }: { 
   const queued = lesson.status === "not_started" && lesson.pending > 0 ? { text: "Queued", color: "var(--text-muted)" } : null;
   const shown = queued ?? chip;
 
+  // One-click action on the row itself: add a lesson that is not in the run, or rewrite a finished one.
+  const quick = !onQueue || lesson.pending > 0 ? null
+    : !lesson.inRun ? { label: "Add to run", primary: true, confirm: "" }
+      : isComplete(lesson.status) && lesson.status !== "checking" ? { label: "Rewrite", primary: false, confirm: "Write this lesson again? Its AI check and any decision are cleared." }
+        : null;
+
+  async function queue() {
+    setBusy(true);
+    try { await onQueue?.(lesson); } finally { setBusy(false); }
+  }
+
   async function act(action: "approve" | "reject") {
     setBusy(true);
     try { await onDecide(lesson, action); } finally { setBusy(false); }
@@ -34,12 +45,24 @@ export default function LessonCard({ lesson, onDecide, defaultOpen = false }: { 
 
   return (
     <div className="rounded-xl" style={{ border: "1px solid var(--border)", background: "var(--bg-elevated)" }}>
-      <button className="w-full text-left p-3 flex items-start gap-2" onClick={() => setOpen((v) => !v)}>
-        <span className="text-xs font-mono mt-0.5" style={{ color: "var(--text-muted)", minWidth: 84 }}>{lesson.subsectionId}</span>
-        <span className="flex-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{lesson.title}</span>
-        <span className="text-xs mt-0.5 whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{written}/{lesson.parts.length} parts</span>
-        <span className="text-xs mt-0.5 whitespace-nowrap font-semibold" style={{ color: shown.color }}>{shown.text}</span>
-      </button>
+      <div className="flex items-start">
+        <button className="flex-1 text-left p-3 flex items-start gap-2 min-w-0" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+          <span className="text-xs font-mono mt-0.5" style={{ color: "var(--text-muted)", minWidth: 84 }}>{lesson.subsectionId}</span>
+          <span className="flex-1 text-sm font-medium" style={{ color: "var(--text-primary)" }}>{lesson.title}</span>
+          <span className="hidden sm:inline text-xs mt-0.5 whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{written}/{lesson.parts.length} parts</span>
+          <span className="text-xs mt-0.5 whitespace-nowrap font-semibold" style={{ color: shown.color }}>{shown.text}</span>
+        </button>
+        {quick && (
+          <button
+            className="m-2 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
+            style={quick.primary ? { background: "#7c3aed", color: "#fff", border: "1px solid #7c3aed", opacity: busy ? 0.5 : 1 } : { border: "1px solid var(--border)", color: "var(--text-secondary)", opacity: busy ? 0.5 : 1 }}
+            disabled={busy}
+            onClick={() => { if (!quick.confirm || confirm(quick.confirm)) queue(); }}
+          >
+            {quick.label}
+          </button>
+        )}
+      </div>
 
       {open && (
         <div className="px-3 pb-3 space-y-4 text-sm" style={{ color: "var(--text-secondary)" }}>

@@ -435,8 +435,9 @@ export async function confirmAiApproved(store: LessonsStore, runId: string, now:
 
 // ── Export ──────────────────────────────────────────────────────────────────
 
-export function buildExport(run: LessonsRun, topics: LessonTopic[], parts: LessonPart[], reviews: LessonReview[], aiReviews: LessonAiReview[], opts: { approvedOnly: boolean; now: Date }) {
-  const lessons = assembleLessons(run, topics, parts, reviews, [], aiReviews).filter((l) => l.status !== "rejected" && isComplete(l.status) && (!opts.approvedOnly || isApproved(l.status)));
+export function buildExport(run: LessonsRun, topics: LessonTopic[], parts: LessonPart[], reviews: LessonReview[], aiReviews: LessonAiReview[], opts: { approvedOnly: boolean; now: Date; only?: string[] }) {
+  const only = opts.only ? new Set(opts.only) : null;
+  const lessons = assembleLessons(run, topics, parts, reviews, [], aiReviews).filter((l) => l.status !== "rejected" && isComplete(l.status) && (!opts.approvedOnly || isApproved(l.status)) && (!only || only.has(l.subsectionId)));
   return {
     schema: "mcat-lessons.export",
     schemaVersion: "3.0.0",
