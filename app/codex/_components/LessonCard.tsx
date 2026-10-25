@@ -3,8 +3,8 @@ import { useState } from "react";
 import { Badge, btn } from "./ui";
 import type { CodexContent } from "../../../lib/codex/types";
 
-export default function LessonCard({ c, locked, onDecide }: { c: CodexContent; locked: boolean; onDecide: (c: CodexContent, action: "approve" | "reject") => Promise<void> }) {
-  const [open, setOpen] = useState(false);
+export default function LessonCard({ c, locked, onDecide, defaultOpen = false }: { c: CodexContent; locked: boolean; onDecide: (c: CodexContent, action: "approve" | "reject") => Promise<void>; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const [busy, setBusy] = useState(false);
   const l = c.content;
   const decided = c.status !== "draft";

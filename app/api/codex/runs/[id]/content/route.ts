@@ -1,20 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
-import { decideContent, startContent } from "../../../../../../lib/codex/engine";
+import { controlContent, decideContent, startContent } from "../../../../../../lib/codex/engine";
 import { errorResponse, getDeps, isDenied, requireCodexUser } from "../../../../../../lib/codex/runtime";
 
-// Reading lessons. action "start": switch lessons on for this run and queue every split topic.
+// Reading lessons. "start": develop lessons for the whole run (switches them on) or, with topicIds, just those topics.
+// "pause" / "resume" / "stop" control lesson work only.
 // "approve" / "reject" (with topicId) and "approve_all" are the human review decisions.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireCodexUser();
   if (isDenied(user)) return user;
   try {
     const { id } = await params;
-    const body = (await req.json()) as { action?: string; topicId?: string };
+    const body = (await req.json()) as { action?: string; topicId?: string; topicIds?: unknown };
     const { store } = getDeps();
     const now = new Date();
 
     if (body.action === "start") {
-      const r = await startContent(store, id, now);
+      const topicIds = Array.isArray(body.topicIds) ? body.topicIds.filter((x): x is string => typeof x === "string") : undefined;
+      const r = await startContent(store, id, now, topicIds);
+      return NextResponse.json(r, { status: r.ok ? 200 : 409 });
+    }
+    if (body.action === "pause" || body.action === "resume" || body.action === "stop") {
+      const r = await controlContent(store, id, body.action);
       return NextResponse.json(r, { status: r.ok ? 200 : 409 });
     }
     if (body.action === "approve_all") {

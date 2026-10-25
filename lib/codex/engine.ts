@@ -104,7 +104,8 @@ export interface Progress {
 }
 
 export async function getProgress(store: CodexStore, runId: string): Promise<Progress> {
-  const [tasks, topics, questions] = await Promise.all([store.listTasks(runId), store.listTopics(runId), store.listQuestions(runId)]);
+  const [tasks, topics, questions, run] = await Promise.all([store.listTasks(runId), store.listTopics(runId), store.listQuestions(runId), store.getRun(runId)]);
+  const held = (t: CodexTask) => run?.contentPaused === true && t.stage === "content" && t.status === "queued"; // paused lessons are not work "to do now"
   const empty = () => ({ queued: 0, running: 0, done: 0, failed: 0 });
   const byStage: Progress["tasks"] = { plan: empty(), expand: empty(), content: empty(), parent: empty(), atomic: empty(), verify: empty() };
   for (const t of tasks) byStage[t.stage][t.status]++;
@@ -112,7 +113,7 @@ export async function getProgress(store: CodexStore, runId: string): Promise<Pro
   for (const q of questions) qs[q.status]++;
   return {
     tasks: byStage,
-    active: tasks.some((t) => t.status === "queued" || t.status === "running"),
+    active: tasks.some((t) => (t.status === "queued" || t.status === "running") && !held(t)),
     failed: tasks.filter((t) => t.status === "failed").length,
     topics: topics.length,
     questions: qs,
@@ -139,7 +140,7 @@ export async function advance(deps: Deps, runId: string): Promise<AdvanceResult>
   if (!run) throw new Error("Run not found");
   if (run.status === "cancelled" || run.banked) return { ran: null, progress: await getProgress(store, runId) };
 
-  const task = await store.claimNextTask(runId, nowOf(deps), LEASE_MS);
+  const task = await store.claimNextTask(runId, nowOf(deps), LEASE_MS, run.contentPaused ? ["content"] : undefined);
   if (!task) return { ran: null, progress: await getProgress(store, runId) };
 
   try {
@@ -325,19 +326,44 @@ async function runContent(deps: Deps, run: CodexRun, task: CodexTask) {
  * Switches lessons on for a run and queues one for every topic whose split has finished and that has none yet.
  * Topics split later are picked up automatically by runExpand.
  */
-export async function startContent(store: CodexStore, runId: string, now: Date): Promise<{ ok: true; queued: number } | { ok: false; error: string }> {
+export async function startContent(
+  store: CodexStore, runId: string, now: Date, topicIds?: string[],
+): Promise<{ ok: true; queued: number } | { ok: false; error: string }> {
   const run = await store.getRun(runId);
   if (!run) return { ok: false, error: "Run not found" };
   if (run.banked) return { ok: false, error: "This run is saved to the database and locked." };
-  await store.updateRun(runId, { contentEnabled: true });
   const [topics, tasks] = await Promise.all([store.listTopics(runId), store.listTasks(runId)]);
   const splitDone = new Set(tasks.filter((t) => t.stage === "expand" && t.status === "done").map((t) => t.targetId));
-  const hasTask = new Set(tasks.filter((t) => t.stage === "content").map((t) => t.targetId));
+  const contentTasks = new Map(tasks.filter((t) => t.stage === "content").map((t) => [t.targetId, t]));
   // A split-off topic (MS-1-SS-1-1.2) belongs to the broad topic it came from (MS-1-SS-1-1).
   const origin = (t: CodexTopic) => (t.groupTitle ? t.id.replace(/\.\d+$/, "") : t.id);
-  const ready = topics.filter((t) => splitDone.has(origin(t)) && !hasTask.has(t.id));
+  const split = topics.filter((t) => splitDone.has(origin(t)));
+
+  let ready: CodexTopic[];
+  if (topicIds) {
+    // A chosen set: only those topics (a topic that already has a lesson is written again). Automatic lessons stay as they were.
+    const want = new Set(topicIds);
+    ready = split.filter((t) => want.has(t.id) && !["queued", "running"].includes(contentTasks.get(t.id)?.status ?? ""));
+  } else {
+    // Develop content for the whole run: switch lessons on so topics split later are added automatically.
+    await store.updateRun(runId, { contentEnabled: true });
+    ready = split.filter((t) => !contentTasks.has(t.id));
+  }
+  await store.updateRun(runId, { contentPaused: false });
   await store.putTasks(ready.map((t) => newTask(runId, "content", t.id, iso(now))));
   return { ok: true, queued: ready.length };
+}
+
+/** Pause holds lessons only (other stages carry on); resume releases them; stop drops every lesson not yet started and turns automatic lessons off. */
+export async function controlContent(store: CodexStore, runId: string, action: "pause" | "resume" | "stop"): Promise<{ ok: true; dropped?: number } | { ok: false; error: string }> {
+  const run = await store.getRun(runId);
+  if (!run) return { ok: false, error: "Run not found" };
+  if (action === "pause") { await store.updateRun(runId, { contentPaused: true }); return { ok: true }; }
+  if (action === "resume") { await store.updateRun(runId, { contentPaused: false }); return { ok: true }; }
+  const queued = (await store.listTasks(runId)).filter((t) => t.stage === "content" && t.status === "queued");
+  await store.deleteTasks(runId, queued.map((t) => t.id));
+  await store.updateRun(runId, { contentEnabled: false, contentPaused: false });
+  return { ok: true, dropped: queued.length };
 }
 
 export async function decideContent(

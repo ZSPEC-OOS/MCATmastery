@@ -74,6 +74,8 @@ export interface CodexRun {
   banked?: RunBanked;
   /** Lessons are developed for every split topic. Always on for the "content" depth; for other depths the user turns it on manually. */
   contentEnabled?: boolean;
+  /** Lessons are held: content tasks are not claimed, every other stage carries on. */
+  contentPaused?: boolean;
 }
 
 export const contentOn = (run: Pick<CodexRun, "depth" | "contentEnabled">) => run.depth === "content" || run.contentEnabled === true;

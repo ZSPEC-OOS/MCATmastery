@@ -5,7 +5,21 @@ Running list, newest first. "Change" = code merged to `main`. "Repair" = somethi
 
 ## 2026-10-25
 
-### Change: reading lessons ("Topics only + content") 
+### Change: lessons toolbar (pause/stop, choose lessons, view content)
+- A **Lessons** toolbar sits under the stage cards once any split has finished. It holds **Develop content** (moved
+  here from the Topic splits card), **Pause lessons / Resume lessons**, **Stop**, **Choose lessons** and
+  **View content**.
+- **Pause lessons** holds lesson work only; other stages keep running. **Resume** releases it. **Stop** drops every
+  lesson not yet started and turns automatic lessons off; lessons already written are kept. A lesson already in
+  flight finishes first (it cannot be cancelled mid-call).
+- **Choose lessons** (`/codex/<run>/lessons`): pick individual topics (by topic, by subsection, all, or only those
+  without a lesson) and develop just those. A topic that already has a lesson is replaced by a new draft after a
+  confirmation. Only topics whose split has finished are queued. It sends you back to the run and starts it.
+- **View content** (`/codex/<run>/content`): lessons only, no questions, grouped by section and subsection, with a
+  filter (all, awaiting, approved, rejected), open/collapse all, per-lesson Approve/Reject and Approve all.
+- **Untested:** written without installed dependencies, so no type-check or run.
+
+### Change: reading lessons ("Topics only + content")
 - **New run type:** *Topics only + content (reading lessons, no questions)*. It plans, splits, then writes one
   reading lesson per split topic. No questions are generated.
 - **Optional on every other run type:** the **Topic splits** card shows a **Develop content** button once splits

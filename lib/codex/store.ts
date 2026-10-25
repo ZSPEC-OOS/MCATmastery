@@ -28,7 +28,8 @@ export interface CodexStore {
   getTask(runId: string, id: string): Promise<CodexTask | null>;
   updateTask(runId: string, id: string, patch: Partial<CodexTask>): Promise<void>;
   /** Atomically claims the next ready task (queued, or running with an expired lease). */
-  claimNextTask(runId: string, now: Date, leaseMs: number): Promise<CodexTask | null>;
+  claimNextTask(runId: string, now: Date, leaseMs: number, skipStages?: CodexStage[]): Promise<CodexTask | null>;
+  deleteTasks(runId: string, ids: string[]): Promise<void>;
 
   putTopics(topics: CodexTopic[]): Promise<void>;
   /** Working topics only: a topic that was split into finer ones is not listed (getTopic still returns it). */
@@ -61,10 +62,11 @@ function applyAnswerTo(prev: CodexProgress | undefined, a: { userId: string; run
 // Corrections queued by verification re-enter at their own stage and are worked through in the same order.
 const STAGE_RANK: Record<CodexStage, number> = { plan: 0, expand: 1, content: 2, parent: 3, atomic: 4, verify: 5 };
 
-export function pickClaimable(tasks: CodexTask[], now: Date): CodexTask[] {
+export function pickClaimable(tasks: CodexTask[], now: Date, skipStages: CodexStage[] = []): CodexTask[] {
   const t = now.getTime();
   return tasks
     .filter((x) => {
+      if (skipStages.includes(x.stage)) return false;
       if (x.status === "queued") return !x.notBefore || new Date(x.notBefore).getTime() <= t;
       if (x.status === "running") return !!x.leaseUntil && new Date(x.leaseUntil).getTime() < t;
       return false;
@@ -113,8 +115,9 @@ export function createMemoryStore(): CodexStore {
     async listTasks(runId) { return [...tasks.values()].filter((t) => t.runId === runId).map(clone); },
     async getTask(runId, id) { const t = tasks.get(docId(runId, id)); return t ? clone(t) : null; },
     async updateTask(runId, id, patch) { const k = docId(runId, id); const t = tasks.get(k); if (t) tasks.set(k, { ...t, ...clone(patch) }); },
-    async claimNextTask(runId, now, leaseMs) {
-      const next = pickClaimable([...tasks.values()].filter((t) => t.runId === runId), now)[0];
+    async deleteTasks(runId, ids) { for (const id of ids) tasks.delete(docId(runId, id)); },
+    async claimNextTask(runId, now, leaseMs, skipStages) {
+      const next = pickClaimable([...tasks.values()].filter((t) => t.runId === runId), now, skipStages)[0];
       if (!next) return null;
       const claimed: CodexTask = { ...next, status: "running", attempts: next.attempts + 1, leaseUntil: new Date(now.getTime() + leaseMs).toISOString(), updatedAt: now.toISOString() };
       tasks.set(docId(runId, next.id), claimed);
@@ -232,15 +235,22 @@ export function createFirestoreStore(): CodexStore {
     async listTasks(runId) { return byRun<CodexTask>(C.tasks, runId); },
     async getTask(runId, id) { const d = await col(C.tasks).doc(docId(runId, id)).get(); return d.exists ? (d.data() as CodexTask) : null; },
     async updateTask(runId, id, patch) { await col(C.tasks).doc(docId(runId, id)).update(clean(patch)); },
-    async claimNextTask(runId, now, leaseMs) {
-      const candidates = pickClaimable(await byRun<CodexTask>(C.tasks, runId), now).slice(0, 6);
+    async deleteTasks(runId, ids) {
+      for (let i = 0; i < ids.length; i += 400) {
+        const batch = fsdb().batch();
+        ids.slice(i, i + 400).forEach((id) => batch.delete(col(C.tasks).doc(docId(runId, id))));
+        await batch.commit();
+      }
+    },
+    async claimNextTask(runId, now, leaseMs, skipStages) {
+      const candidates = pickClaimable(await byRun<CodexTask>(C.tasks, runId), now, skipStages).slice(0, 6);
       for (const c of candidates) {
         const ref = col(C.tasks).doc(docId(runId, c.id));
         const claimed = await fsdb().runTransaction(async (tx) => {
           const snap = await tx.get(ref);
           if (!snap.exists) return null;
           const cur = snap.data() as CodexTask;
-          if (pickClaimable([cur], now).length === 0) return null; // someone else claimed it first
+          if (pickClaimable([cur], now, skipStages).length === 0) return null; // someone else claimed it first
           const next: CodexTask = { ...cur, status: "running", attempts: cur.attempts + 1, leaseUntil: new Date(now.getTime() + leaseMs).toISOString(), updatedAt: now.toISOString() };
           tx.set(ref, clean(next));
           return next;
